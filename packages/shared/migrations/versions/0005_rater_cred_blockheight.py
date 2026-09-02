@@ -5,9 +5,12 @@ agent AT THE FEEDBACK'S BLOCK HEIGHT (via agent_owner_history), consistent with 
 scoring engine — replacing the previous current-owner definition. Migrations are immutable, so
 this does not edit 0002; it drops and recreates the view with the corrected SQL.
 
-Revision ID: 0005_rater_credibility_block_height
+Revision ID: 0005_rater_cred_blockheight
 Revises: 0004_scoring_schema
 Create Date: 2026-09-02
+
+Note: the revision id is a short slug (<= 32 chars) so it fits Alembic's default
+``alembic_version.version_num VARCHAR(32)`` column on Postgres.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0005_rater_credibility_block_height"
+revision: str = "0005_rater_cred_blockheight"
 down_revision: str | None = "0004_scoring_schema"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

@@ -1,0 +1,58 @@
+[project]
+name = "provenalt-indexer"
+version = "0.1.0"
+description = "Provenalt indexer — backfills and head-follows the ERC-8004 registries on Base."
+requires-python = ">=3.12"
+dependencies = [
+    "provenalt-shared",
+    "eth-abi>=5.1",
+    "eth-utils>=4.1",
+    "eth-hash[pycryptodome]>=0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+provenalt-indexer = "provenalt_indexer.worker:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["provenalt_indexer*"]
+
+[tool.setuptools.package-data]
+provenalt_indexer = ["abis/*.json"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: hits a real RPC endpoint or database; excluded from default runs",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# Resolve the sibling shared package's types directly from source in the monorepo.
+mypy_path = "../../packages/shared"
+
+# eth-abi / eth-utils ship types but don't re-export these helpers from their package
+# __init__, which trips strict implicit-reexport checks. Treat them as untyped imports.
+[[tool.mypy.overrides]]
+module = ["eth_abi.*", "eth_utils.*"]
+follow_imports = "skip"
+ignore_missing_imports = true

@@ -1,0 +1,521 @@
+"""Repository primitives for the identity and reputation indexes.
+
+All writes are idempotent (upsert on the ``(tx_hash, log_index)`` natural key or the agent
+primary key), so replaying the same logs — during backfill restarts or after a reorg
+re-index — never creates duplicates. Higher-level event dispatch and reorg re-derivation
+live in the indexer service; this module stays decoupled from event decoding.
+
+Both registries share ``raw_logs``, so reorg deletions are scoped by contract address.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, Select, case, delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import Session
+
+from provenalt_shared.db.models import (
+    Agent,
+    AgentMetadata,
+    AgentOwnerHistory,
+    Feedback,
+    FeedbackResponse,
+    FeedbackRevocation,
+    IndexerCursor,
+    RawLog,
+)
+
+__all__ = [
+    "Agent",
+    "AgentMetadata",
+    "AgentOwnerHistory",
+    "Feedback",
+    "FeedbackResponse",
+    "FeedbackRevocation",
+    "IndexerCursor",
+    "RawLog",
+    "upsert_raw_log",
+    "upsert_agent",
+    "set_agent_owner",
+    "set_agent_uri",
+    "agent_exists",
+    "append_owner_history",
+    "insert_metadata",
+    "insert_feedback",
+    "insert_feedback_revocation",
+    "insert_feedback_response",
+    "recompute_owner_from_history",
+    "get_cursor",
+    "upsert_cursor",
+    "set_last_indexed_block",
+    "raw_logs_above",
+    "raw_logs_by_topic0s",
+    "block_hashes_in_range",
+    "delete_rows_above",
+    "delete_raw_logs_above",
+    "max_agent_id",
+    "all_agent_ids",
+    "missing_agent_ids",
+    "RaterCredibility",
+    "rater_credibility_select",
+    "rater_credibility_rows",
+    "refresh_rater_credibility",
+    "RATER_CREDIBILITY_VIEW",
+    "RATER_CREDIBILITY_SQL",
+]
+
+
+def _insert(session: Session, model: type) -> Any:
+    """Return a dialect-appropriate INSERT construct supporting ON CONFLICT."""
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        return pg_insert(model)
+    if dialect == "sqlite":
+        return sqlite_insert(model)
+    raise RuntimeError(f"unsupported dialect for upsert: {dialect}")
+
+
+def _insert_ignore(
+    session: Session, model: type, values: dict[str, Any], conflict_cols: list[str]
+) -> bool:
+    """Insert-or-ignore on a conflict target. Returns True iff a row was inserted."""
+    stmt = (
+        _insert(session, model)
+        .values(**values)
+        .on_conflict_do_nothing(index_elements=conflict_cols)
+    )
+    result = cast(CursorResult[Any], session.execute(stmt))
+    return bool(result.rowcount)
+
+
+# ── raw_logs ─────────────────────────────────────────────────────────────────
+
+
+def upsert_raw_log(
+    session: Session,
+    *,
+    address: str,
+    block_number: int,
+    block_hash: str,
+    tx_hash: str,
+    log_index: int,
+    topic0: str,
+    topics: list[str],
+    data: str,
+    log_removed: bool = False,
+) -> bool:
+    return _insert_ignore(
+        session,
+        RawLog,
+        {
+            "address": address.lower(),
+            "block_number": block_number,
+            "block_hash": block_hash.lower(),
+            "tx_hash": tx_hash.lower(),
+            "log_index": log_index,
+            "topic0": topic0.lower(),
+            "topics": [t.lower() for t in topics],
+            "data": data,
+            "log_removed": log_removed,
+        },
+        ["tx_hash", "log_index"],
+    )
+
+
+def raw_logs_above(session: Session, block_number: int) -> list[RawLog]:
+    return list(session.execute(select(RawLog).where(RawLog.block_number > block_number)).scalars())
+
+
+def block_hashes_in_range(
+    session: Session, low: int, high: int, addresses: list[str] | None = None
+) -> list[tuple[int, str]]:
+    """Distinct ``(block_number, block_hash)`` for indexed blocks in ``[low, high]``.
+
+    Used for reorg detection: a stored hash that no longer matches the chain marks a fork.
+    ``addresses`` scopes the scan to one registry's contract(s) — required because both
+    registries share ``raw_logs``.
+    """
+    stmt = select(RawLog.block_number, RawLog.block_hash).where(
+        RawLog.block_number >= low, RawLog.block_number <= high
+    )
+    if addresses is not None:
+        stmt = stmt.where(RawLog.address.in_([a.lower() for a in addresses]))
+    rows = session.execute(stmt.distinct().order_by(RawLog.block_number)).all()
+    return [(int(bn), bh) for bn, bh in rows]
+
+
+def raw_logs_by_topic0s(session: Session, topic0s: list[str]) -> list[RawLog]:
+    """All logs matching any of ``topic0s``, ordered by (block_number, log_index)."""
+    lowered = [t.lower() for t in topic0s]
+    return list(
+        session.execute(
+            select(RawLog)
+            .where(RawLog.topic0.in_(lowered))
+            .order_by(RawLog.block_number, RawLog.log_index)
+        ).scalars()
+    )
+
+
+# ── agents ───────────────────────────────────────────────────────────────────
+
+
+def upsert_agent(
+    session: Session,
+    *,
+    agent_id: int,
+    owner: str,
+    agent_uri: str,
+    registered_block: int,
+    registered_tx_hash: str,
+    registered_log_index: int,
+) -> bool:
+    """Insert a newly registered agent. Registration is one-time → insert-or-ignore."""
+    return _insert_ignore(
+        session,
+        Agent,
+        {
+            "agent_id": agent_id,
+            "owner": owner.lower(),
+            "agent_uri": agent_uri,
+            "registered_block": registered_block,
+            "registered_tx_hash": registered_tx_hash.lower(),
+            "registered_log_index": registered_log_index,
+        },
+        ["agent_id"],
+    )
+
+
+def agent_exists(session: Session, agent_id: int) -> bool:
+    return session.get(Agent, agent_id) is not None
+
+
+def set_agent_owner(session: Session, agent_id: int, owner: str) -> None:
+    agent = session.get(Agent, agent_id)
+    if agent is not None:
+        agent.owner = owner.lower()
+
+
+def set_agent_uri(session: Session, agent_id: int, agent_uri: str) -> None:
+    agent = session.get(Agent, agent_id)
+    if agent is not None:
+        agent.agent_uri = agent_uri
+
+
+def append_owner_history(
+    session: Session,
+    *,
+    agent_id: int,
+    from_address: str,
+    to_address: str,
+    block_number: int,
+    tx_hash: str,
+    log_index: int,
+) -> bool:
+    return _insert_ignore(
+        session,
+        AgentOwnerHistory,
+        {
+            "agent_id": agent_id,
+            "from_address": from_address.lower(),
+            "to_address": to_address.lower(),
+            "block_number": block_number,
+            "tx_hash": tx_hash.lower(),
+            "log_index": log_index,
+        },
+        ["tx_hash", "log_index"],
+    )
+
+
+def recompute_owner_from_history(session: Session, agent_id: int) -> None:
+    """Set ``agents.owner`` to the ``to_address`` of the latest surviving history row."""
+    latest = session.execute(
+        select(AgentOwnerHistory)
+        .where(AgentOwnerHistory.agent_id == agent_id)
+        .order_by(AgentOwnerHistory.block_number.desc(), AgentOwnerHistory.log_index.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest is not None:
+        set_agent_owner(session, agent_id, latest.to_address)
+
+
+# ── metadata ─────────────────────────────────────────────────────────────────
+
+
+def insert_metadata(
+    session: Session,
+    *,
+    agent_id: int,
+    metadata_key: str,
+    indexed_key_hash: str,
+    metadata_value: bytes,
+    block_number: int,
+    tx_hash: str,
+    log_index: int,
+) -> bool:
+    return _insert_ignore(
+        session,
+        AgentMetadata,
+        {
+            "agent_id": agent_id,
+            "metadata_key": metadata_key,
+            "indexed_key_hash": indexed_key_hash.lower(),
+            "metadata_value": metadata_value,
+            "block_number": block_number,
+            "tx_hash": tx_hash.lower(),
+            "log_index": log_index,
+        },
+        ["tx_hash", "log_index"],
+    )
+
+
+# ── cursor ───────────────────────────────────────────────────────────────────
+
+
+def get_cursor(session: Session, registry: str) -> IndexerCursor | None:
+    return session.get(IndexerCursor, registry)
+
+
+def upsert_cursor(
+    session: Session, registry: str, anchor_block: int, last_indexed_block: int
+) -> None:
+    cursor = session.get(IndexerCursor, registry)
+    if cursor is None:
+        session.add(
+            IndexerCursor(
+                registry_name=registry,
+                anchor_block=anchor_block,
+                last_indexed_block=last_indexed_block,
+            )
+        )
+    else:
+        cursor.anchor_block = anchor_block
+        cursor.last_indexed_block = last_indexed_block
+
+
+def set_last_indexed_block(session: Session, registry: str, block_number: int) -> None:
+    cursor = session.get(IndexerCursor, registry)
+    if cursor is None:
+        raise ValueError(f"no cursor for registry {registry!r}; call upsert_cursor first")
+    cursor.last_indexed_block = block_number
+
+
+# ── reorg rewind ─────────────────────────────────────────────────────────────
+
+
+def delete_rows_above(
+    session: Session,
+    model: type,
+    block_number: int,
+    *,
+    block_column: str = "block_number",
+) -> None:
+    """Delete rows of ``model`` whose block column is above ``block_number`` (reorg rewind)."""
+    column = getattr(model, block_column)
+    session.execute(delete(model).where(column > block_number))
+
+
+def delete_raw_logs_above(session: Session, block_number: int, addresses: list[str]) -> None:
+    """Delete ``raw_logs`` above ``block_number`` for the given contract address(es) only.
+
+    Scoped by address so one registry's reorg rewind never deletes the other's logs from
+    the shared ``raw_logs`` table.
+    """
+    lowered = [a.lower() for a in addresses]
+    session.execute(
+        delete(RawLog).where(RawLog.block_number > block_number, RawLog.address.in_(lowered))
+    )
+
+
+# ── continuity (verification harness 2.5) ────────────────────────────────────
+
+
+def max_agent_id(session: Session) -> int | None:
+    return session.execute(select(func.max(Agent.agent_id))).scalar_one_or_none()
+
+
+def all_agent_ids(session: Session) -> list[int]:
+    return list(session.execute(select(Agent.agent_id).order_by(Agent.agent_id)).scalars())
+
+
+def missing_agent_ids(session: Session) -> list[int]:
+    """Return the agentIds absent from the contiguous range ``1..max`` (should be empty)."""
+    top = max_agent_id(session)
+    if top is None:
+        return []
+    present = set(all_agent_ids(session))
+    return [i for i in range(1, top + 1) if i not in present]
+
+
+# ── reputation writes (proposal §3.2) ────────────────────────────────────────
+
+
+def insert_feedback(
+    session: Session,
+    *,
+    agent_id: int,
+    client_address: str,
+    feedback_index: int,
+    value: int,
+    value_decimals: int,
+    value_scaled: Decimal,
+    indexed_tag1_hash: str,
+    tag1: str,
+    tag2: str,
+    endpoint: str,
+    feedback_uri: str,
+    feedback_hash: str,
+    block_number: int,
+    tx_hash: str,
+    log_index: int,
+) -> bool:
+    return _insert_ignore(
+        session,
+        Feedback,
+        {
+            "agent_id": agent_id,
+            "client_address": client_address.lower(),
+            "feedback_index": feedback_index,
+            "value": Decimal(value),
+            "value_decimals": value_decimals,
+            "value_scaled": value_scaled,
+            "indexed_tag1_hash": indexed_tag1_hash.lower(),
+            "tag1": tag1,
+            "tag2": tag2,
+            "endpoint": endpoint,
+            "feedback_uri": feedback_uri,
+            "feedback_hash": feedback_hash.lower(),
+            "block_number": block_number,
+            "tx_hash": tx_hash.lower(),
+            "log_index": log_index,
+        },
+        ["tx_hash", "log_index"],
+    )
+
+
+def insert_feedback_revocation(
+    session: Session,
+    *,
+    agent_id: int,
+    client_address: str,
+    feedback_index: int,
+    block_number: int,
+    tx_hash: str,
+    log_index: int,
+) -> bool:
+    return _insert_ignore(
+        session,
+        FeedbackRevocation,
+        {
+            "agent_id": agent_id,
+            "client_address": client_address.lower(),
+            "feedback_index": feedback_index,
+            "block_number": block_number,
+            "tx_hash": tx_hash.lower(),
+            "log_index": log_index,
+        },
+        ["tx_hash", "log_index"],
+    )
+
+
+def insert_feedback_response(
+    session: Session,
+    *,
+    agent_id: int,
+    client_address: str,
+    feedback_index: int,
+    responder: str,
+    response_uri: str,
+    response_hash: str,
+    block_number: int,
+    tx_hash: str,
+    log_index: int,
+) -> bool:
+    return _insert_ignore(
+        session,
+        FeedbackResponse,
+        {
+            "agent_id": agent_id,
+            "client_address": client_address.lower(),
+            "feedback_index": feedback_index,
+            "responder": responder.lower(),
+            "response_uri": response_uri,
+            "response_hash": response_hash.lower(),
+            "block_number": block_number,
+            "tx_hash": tx_hash.lower(),
+            "log_index": log_index,
+        },
+        ["tx_hash", "log_index"],
+    )
+
+
+# ── rater credibility (proposal §3.4) ────────────────────────────────────────
+
+RATER_CREDIBILITY_VIEW = "rater_credibility"
+
+# Portable SQL kept in sync with ``rater_credibility_select`` via a cross-check test.
+# Self-feedback = the rater is the current owner of the agent it rated.
+RATER_CREDIBILITY_SQL = """
+SELECT
+    f.client_address AS client_address,
+    MIN(f.block_number) AS first_seen_block,
+    COUNT(*) AS feedback_count,
+    COUNT(DISTINCT f.agent_id) AS distinct_agents_rated,
+    SUM(CASE WHEN a.owner = f.client_address THEN 1 ELSE 0 END) AS self_feedback_count
+FROM feedback f
+LEFT JOIN agents a ON a.agent_id = f.agent_id
+GROUP BY f.client_address
+""".strip()
+
+
+@dataclass(frozen=True)
+class RaterCredibility:
+    client_address: str
+    first_seen_block: int
+    feedback_count: int
+    distinct_agents_rated: int
+    self_feedback_count: int
+
+
+def rater_credibility_select() -> Select[Any]:
+    """The materialized-view query as a SQLAlchemy Select (single source of truth)."""
+    self_feedback = func.sum(case((Agent.owner == Feedback.client_address, 1), else_=0))
+    return (
+        select(
+            Feedback.client_address.label("client_address"),
+            func.min(Feedback.block_number).label("first_seen_block"),
+            func.count().label("feedback_count"),
+            func.count(func.distinct(Feedback.agent_id)).label("distinct_agents_rated"),
+            self_feedback.label("self_feedback_count"),
+        )
+        .select_from(Feedback)
+        .outerjoin(Agent, Agent.agent_id == Feedback.agent_id)
+        .group_by(Feedback.client_address)
+    )
+
+
+def rater_credibility_rows(session: Session) -> list[RaterCredibility]:
+    """Compute rater credibility directly from ``feedback`` (portable; used in tests)."""
+    rows = session.execute(rater_credibility_select()).all()
+    return [
+        RaterCredibility(
+            client_address=r.client_address,
+            first_seen_block=int(r.first_seen_block),
+            feedback_count=int(r.feedback_count),
+            distinct_agents_rated=int(r.distinct_agents_rated),
+            self_feedback_count=int(r.self_feedback_count or 0),
+        )
+        for r in rows
+    ]
+
+
+def refresh_rater_credibility(session: Session) -> None:
+    """Refresh the Postgres materialized view. No-op on SQLite (plain view is live)."""
+    from sqlalchemy import text
+
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text(f"REFRESH MATERIALIZED VIEW {RATER_CREDIBILITY_VIEW}"))

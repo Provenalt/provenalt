@@ -1,0 +1,197 @@
+"""ORM models for the identity index (§2.1) and the reputation index (§3.2).
+
+Identity tables:
+    * ``raw_logs``            — append-only event store; the source of truth for BOTH
+                                registries. Natural key ``(tx_hash, log_index)`` is unique;
+                                ``block_hash`` per row supports reorg detection (§4).
+    * ``agents``              — one row per ERC-8004 agent (ERC-721 tokenId). ``owner`` and
+                                ``agent_uri`` are the latest materialised values.
+    * ``agent_metadata``      — every ``MetadataSet`` event (a log, not a latest-value).
+    * ``agent_owner_history`` — every ownership change (``Registered`` seeds it from the
+                                zero address; each ``Transfer`` appends a row).
+    * ``indexer_cursor``      — per-registry backfill anchor + last-indexed block, so the
+                                worker is resumable across restarts.
+
+Reputation tables (append-only event logs, keyed logically by
+``(agent_id, client_address, feedback_index)``):
+    * ``feedback``             — every ``NewFeedback`` event; ``value`` is the raw signed
+                                 int128 and ``value_scaled`` is ``value / 10**value_decimals``.
+    * ``feedback_revocations`` — every ``FeedbackRevoked`` event.
+    * ``feedback_responses``   — every ``ResponseAppended`` event.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Index,
+    Integer,
+    LargeBinary,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
+
+from provenalt_shared.db.base import Base
+
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+class RawLog(Base):
+    __tablename__ = "raw_logs"
+    __table_args__ = (
+        UniqueConstraint("tx_hash", "log_index", name="uq_raw_logs_tx_log"),
+        Index("ix_raw_logs_block_number", "block_number"),
+        Index("ix_raw_logs_address_topic0", "address", "topic0"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    address: Mapped[str] = mapped_column(String(42), nullable=False)
+    block_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    block_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    topic0: Mapped[str] = mapped_column(String(66), nullable=False)
+    topics: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    data: Mapped[str] = mapped_column(String, nullable=False, default="0x")
+    log_removed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    owner: Mapped[str] = mapped_column(String(42), nullable=False)
+    agent_uri: Mapped[str] = mapped_column(String, nullable=False, default="")
+    registered_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    registered_tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    registered_log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class AgentMetadata(Base):
+    __tablename__ = "agent_metadata"
+    __table_args__ = (
+        UniqueConstraint("tx_hash", "log_index", name="uq_agent_metadata_tx_log"),
+        Index("ix_agent_metadata_agent_id", "agent_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    metadata_key: Mapped[str] = mapped_column(String, nullable=False)
+    indexed_key_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    metadata_value: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    block_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AgentOwnerHistory(Base):
+    __tablename__ = "agent_owner_history"
+    __table_args__ = (
+        UniqueConstraint("tx_hash", "log_index", name="uq_agent_owner_history_tx_log"),
+        Index("ix_agent_owner_history_agent_id", "agent_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    from_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    to_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    block_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Feedback(Base):
+    __tablename__ = "feedback"
+    __table_args__ = (
+        UniqueConstraint("tx_hash", "log_index", name="uq_feedback_tx_log"),
+        Index("ix_feedback_agent_id", "agent_id"),
+        Index("ix_feedback_client_address", "client_address"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    client_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    feedback_index: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Raw signed int128 value and its decimal scale, plus the decoded scaled value.
+    value: Mapped[Decimal] = mapped_column(Numeric(40, 0), nullable=False)
+    value_decimals: Mapped[int] = mapped_column(Integer, nullable=False)
+    value_scaled: Mapped[Decimal] = mapped_column(Numeric(60, 18), nullable=False)
+    indexed_tag1_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    tag1: Mapped[str] = mapped_column(String, nullable=False, default="")
+    tag2: Mapped[str] = mapped_column(String, nullable=False, default="")
+    endpoint: Mapped[str] = mapped_column(String, nullable=False, default="")
+    feedback_uri: Mapped[str] = mapped_column(String, nullable=False, default="")
+    feedback_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    block_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class FeedbackRevocation(Base):
+    __tablename__ = "feedback_revocations"
+    __table_args__ = (
+        UniqueConstraint("tx_hash", "log_index", name="uq_feedback_revocations_tx_log"),
+        Index("ix_feedback_revocations_feedback", "agent_id", "client_address", "feedback_index"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    client_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    feedback_index: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    block_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class FeedbackResponse(Base):
+    __tablename__ = "feedback_responses"
+    __table_args__ = (
+        UniqueConstraint("tx_hash", "log_index", name="uq_feedback_responses_tx_log"),
+        Index("ix_feedback_responses_feedback", "agent_id", "client_address", "feedback_index"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    client_address: Mapped[str] = mapped_column(String(42), nullable=False)
+    feedback_index: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    responder: Mapped[str] = mapped_column(String(42), nullable=False)
+    response_uri: Mapped[str] = mapped_column(String, nullable=False, default="")
+    response_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    block_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tx_hash: Mapped[str] = mapped_column(String(66), nullable=False)
+    log_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class IndexerCursor(Base):
+    __tablename__ = "indexer_cursor"
+
+    # Attribute is ``registry_name`` (``registry`` clashes with DeclarativeBase.registry);
+    # the DB column keeps the name ``registry``.
+    registry_name: Mapped[str] = mapped_column("registry", String(64), primary_key=True)
+    anchor_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_indexed_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

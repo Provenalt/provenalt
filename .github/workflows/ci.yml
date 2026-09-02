@@ -1,0 +1,85 @@
+name: CI
+
+# Runs lint + typecheck + tests on every PR and on pushes to main.
+# Deploys are gated on this being green (no deploy on red) — configure the deploy
+# platforms (Railway/Vercel) to require a passing CI check before promoting.
+#
+# This workflow is ready to activate as soon as the remote repository exists; it
+# needs no secrets to run.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared:
+    name: packages/shared (lint + typecheck + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/shared
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: packages/shared/pyproject.toml
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Typecheck (mypy)
+        run: mypy provenalt_shared
+
+      - name: Tests (pytest — unit only; integration excluded by default)
+        run: pytest
+
+  indexer:
+    name: services/indexer (lint + typecheck + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/indexer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/indexer/pyproject.toml
+
+      - name: Install shared (dependency) + indexer
+        run: |
+          pip install -e ../../packages/shared
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Typecheck (mypy)
+        run: mypy provenalt_indexer
+
+      - name: Tests (pytest — unit only; integration excluded by default)
+        run: pytest
+
+  # Web (Next.js) CI is added in Group 8 when the explorer is scaffolded.

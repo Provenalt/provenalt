@@ -1,0 +1,51 @@
+[project]
+name = "provenalt-shared"
+version = "0.1.0"
+description = "Provenalt shared library — settings, structured logging, and the Base chain client."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "structlog>=24.1",
+    "httpx>=0.27",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["provenalt_shared*"]
+
+[tool.setuptools.package-data]
+provenalt_shared = ["py.typed"]
+
+[tool.pytest.ini_options]
+# Default runs exclude integration tests (they hit a real RPC endpoint).
+# Run them explicitly with: pytest -m integration
+addopts = "-m 'not integration'"
+markers = [
+    "integration: hits a real RPC endpoint; excluded from default runs",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

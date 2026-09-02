@@ -52,11 +52,21 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
       migration `0003`: `agent_cards`, `card_drift`, `card_refresh_queue`)_
 
 ## Group 5 — Scoring engine v1
-- [ ] 5.1 Implement components per §6 as pure functions over DB state; weights in config
-- [ ] 5.2 Sybil heuristics: fresh-rater burst detection, per-rater influence cap, self/circular feedback flags
-- [ ] 5.3 Score persistence + recompute triggers (event-driven for affected agents, nightly full sweep)
-- [ ] 5.4 METHODOLOGY.md — public, human-readable, versioned with the weights
-- [ ] 5.5 Golden tests: fixture agents (fresh, established, sybil-boosted, transferred-ownership) with expected score bands
+- [x] 5.1 Implement components per §6 as pure functions over DB state; weights in config
+      _(`provenalt_shared/scoring/`: pure `components.py`/`engine.py` over dataclass inputs; DB gather in `inputs.py`; weights in `weights.py`, `WEIGHTS_VERSION=1`)_
+- [x] 5.2 Sybil heuristics: fresh-rater burst detection, per-rater influence cap, self/circular feedback flags
+      _(self-feedback judged by owner **at the feedback's block height** via `agent_owner_history` — design note b; circular = owner reciprocity; per-rater cap; fresh-burst discount)_
+- [x] 5.3 Score persistence + recompute triggers (event-driven for affected agents, nightly full sweep)
+      _(migration `0004`: `agent_scores`, `score_refresh_queue`; `scoring/pipeline.py`; enqueue on new/activity + periodic sweep; wired into worker)_
+- [x] 5.4 METHODOLOGY.md — public, human-readable, versioned with the weights
+      _(root `METHODOLOGY.md`, versioned with `WEIGHTS_VERSION`)_
+- [x] 5.5 Golden tests: fixture agents (fresh, established, sybil-boosted, transferred-ownership) with expected score bands
+      _(`test_scoring_db.py::test_golden_score_bands`: established > sybil, established > transferred, fresh → insufficient_data)_
+
+> Note: `registration_match` is weighted heavily and the heuristic `wallet_status` lightly
+> (design note a). Group 3's `rater_credibility` view computes self-feedback by **current**
+> owner; the scoring engine supersedes it with **block-height-correct** self-feedback and
+> leaves that view unchanged (flagged for review).
 
 ## Group 6 — Public API
 - [ ] 6.1 FastAPI service with endpoints per §7 (free tier), pagination, filters; OpenAPI docs published

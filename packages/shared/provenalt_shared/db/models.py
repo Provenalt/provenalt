@@ -235,6 +235,34 @@ class CardRefreshQueue(Base):
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class AgentScore(Base):
+    """Latest persisted Provenalt Score per agent (proposal §5.3, §6)."""
+
+    __tablename__ = "agent_scores"
+
+    agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    confidence: Mapped[str] = mapped_column(String(32), nullable=False)
+    sufficient: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    breakdown: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    weights_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    as_of_block: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ScoreRefreshQueue(Base):
+    """Pending rescore work (§5.3). One pending entry per agent (PK = agent_id)."""
+
+    __tablename__ = "score_refresh_queue"
+
+    agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    # new_agent | activity | periodic
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class IndexerCursor(Base):
     __tablename__ = "indexer_cursor"
 

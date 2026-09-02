@@ -25,6 +25,7 @@ from provenalt_shared.db.models import (
     AgentCard,
     AgentMetadata,
     AgentOwnerHistory,
+    AgentScore,
     CardDrift,
     CardRefreshQueue,
     Feedback,
@@ -32,6 +33,7 @@ from provenalt_shared.db.models import (
     FeedbackRevocation,
     IndexerCursor,
     RawLog,
+    ScoreRefreshQueue,
 )
 
 __all__ = [
@@ -83,6 +85,14 @@ __all__ = [
     "delete_card_refresh",
     "agents_needing_card_refresh",
     "enqueue_all_agents_for_refresh",
+    "max_indexed_block",
+    "upsert_agent_score",
+    "get_agent_score",
+    "enqueue_score_refresh",
+    "list_pending_score_refresh",
+    "delete_score_refresh",
+    "agents_needing_score_refresh",
+    "enqueue_all_agents_for_scoring",
 ]
 
 
@@ -664,5 +674,115 @@ def enqueue_all_agents_for_refresh(session: Session, reason: str = "periodic") -
     enqueued = 0
     for agent_id in all_agent_ids(session):
         if enqueue_card_refresh(session, agent_id, reason):
+            enqueued += 1
+    return enqueued
+
+
+# ── scoring persistence (proposal §5.3) ──────────────────────────────────────
+
+
+def max_indexed_block(session: Session) -> int:
+    """The highest indexed block (frontier), used as the scoring ``as_of_block`` default."""
+    return int(session.execute(select(func.max(RawLog.block_number))).scalar_one_or_none() or 0)
+
+
+def upsert_agent_score(
+    session: Session,
+    *,
+    agent_id: int,
+    score: int | None,
+    confidence: str,
+    sufficient: bool,
+    breakdown: list[dict[str, Any]],
+    weights_version: str,
+    as_of_block: int,
+) -> None:
+    row = session.get(AgentScore, agent_id)
+    if row is None:
+        row = AgentScore(
+            agent_id=agent_id,
+            confidence=confidence,
+            weights_version=weights_version,
+            as_of_block=as_of_block,
+        )
+        session.add(row)
+    row.score = score
+    row.confidence = confidence
+    row.sufficient = sufficient
+    row.breakdown = breakdown
+    row.weights_version = weights_version
+    row.as_of_block = as_of_block
+
+
+def get_agent_score(session: Session, agent_id: int) -> AgentScore | None:
+    return session.get(AgentScore, agent_id)
+
+
+def enqueue_score_refresh(session: Session, agent_id: int, reason: str) -> bool:
+    return _insert_ignore(
+        session, ScoreRefreshQueue, {"agent_id": agent_id, "reason": reason}, ["agent_id"]
+    )
+
+
+def list_pending_score_refresh(session: Session, limit: int = 100) -> list[ScoreRefreshQueue]:
+    return list(
+        session.execute(
+            select(ScoreRefreshQueue).order_by(ScoreRefreshQueue.enqueued_at).limit(limit)
+        ).scalars()
+    )
+
+
+def delete_score_refresh(session: Session, agent_id: int) -> None:
+    entry = session.get(ScoreRefreshQueue, agent_id)
+    if entry is not None:
+        session.delete(entry)
+
+
+def agents_needing_score_refresh(session: Session) -> list[tuple[int, str]]:
+    """Agents that should be rescored: never scored (``new_agent``) or with on-chain activity
+    (feedback / ownership change) after the block their score was last computed for."""
+    result: list[tuple[int, str]] = []
+
+    latest_feedback = (
+        select(Feedback.agent_id, func.max(Feedback.block_number).label("blk"))
+        .group_by(Feedback.agent_id)
+        .subquery()
+    )
+    latest_owner = (
+        select(
+            AgentOwnerHistory.agent_id,
+            func.max(AgentOwnerHistory.block_number).label("blk"),
+        )
+        .group_by(AgentOwnerHistory.agent_id)
+        .subquery()
+    )
+
+    rows = session.execute(
+        select(
+            Agent.agent_id,
+            AgentScore.as_of_block,
+            latest_feedback.c.blk,
+            latest_owner.c.blk,
+        )
+        .outerjoin(AgentScore, AgentScore.agent_id == Agent.agent_id)
+        .outerjoin(latest_feedback, latest_feedback.c.agent_id == Agent.agent_id)
+        .outerjoin(latest_owner, latest_owner.c.agent_id == Agent.agent_id)
+    ).all()
+
+    for agent_id, scored_block, fb_blk, owner_blk in rows:
+        if scored_block is None:
+            result.append((agent_id, "new_agent"))
+            continue
+        activity = max(int(fb_blk or 0), int(owner_blk or 0))
+        if activity > int(scored_block):
+            result.append((agent_id, "activity"))
+    return result
+
+
+def enqueue_all_agents_for_scoring(session: Session, reason: str = "periodic") -> int:
+    """Enqueue every known agent for rescoring (nightly full sweep)."""
+    enqueued = 0
+    for agent_id in all_agent_ids(session):
+        if enqueue_score_refresh(session, agent_id, reason):
             enqueued += 1
     return enqueued

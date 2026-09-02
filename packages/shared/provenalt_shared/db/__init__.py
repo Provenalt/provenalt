@@ -6,6 +6,7 @@ from provenalt_shared.db.models import (
     AgentCard,
     AgentMetadata,
     AgentOwnerHistory,
+    AgentScore,
     CardDrift,
     CardRefreshQueue,
     Feedback,
@@ -13,6 +14,7 @@ from provenalt_shared.db.models import (
     FeedbackRevocation,
     IndexerCursor,
     RawLog,
+    ScoreRefreshQueue,
 )
 
 __all__ = [
@@ -23,6 +25,7 @@ __all__ = [
     "AgentCard",
     "AgentMetadata",
     "AgentOwnerHistory",
+    "AgentScore",
     "CardDrift",
     "CardRefreshQueue",
     "Feedback",
@@ -30,4 +33,5 @@ __all__ = [
     "FeedbackRevocation",
     "IndexerCursor",
     "RawLog",
+    "ScoreRefreshQueue",
 ]

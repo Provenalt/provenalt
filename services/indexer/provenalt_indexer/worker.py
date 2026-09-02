@@ -15,6 +15,7 @@ from provenalt_shared.chain import ChainClient, HttpxTransport
 from provenalt_shared.db import make_engine, make_session_factory
 from provenalt_shared.db import repository as repo
 from provenalt_shared.logging import configure_logging, get_logger
+from provenalt_shared.scoring import pipeline as scoring_pipeline
 from provenalt_shared.settings import get_settings
 from sqlalchemy.orm import Session
 
@@ -29,8 +30,9 @@ from provenalt_indexer.registries import REGISTRIES
 # Kept for backwards compatibility with earlier tests/wiring.
 REGISTRY_NAME = "identity"
 DEFAULT_POLL_SECONDS = 5.0
-# How often (in poll ticks) to run a full periodic card-refresh sweep.
+# How often (in poll ticks) to run a full periodic card-refresh / rescore sweep.
 CARD_SWEEP_EVERY_TICKS = 720
+SCORE_SWEEP_EVERY_TICKS = 720
 
 log = get_logger("indexer.worker")
 
@@ -144,9 +146,17 @@ def main() -> None:  # pragma: no cover - long-running process wiring
             if tick % CARD_SWEEP_EVERY_TICKS == 0:
                 repo.enqueue_all_agents_for_refresh(session)
                 session.commit()
-            processed = card_pipeline.run_once(session, card_fetcher)
-            if processed:
-                log.info("card_pipeline_tick", processed=processed)
+            fetched = card_pipeline.run_once(session, card_fetcher)
+            if fetched:
+                log.info("card_pipeline_tick", processed=fetched)
+
+            # Scoring pipeline: rescore new/changed agents; periodic full sweep occasionally.
+            if tick % SCORE_SWEEP_EVERY_TICKS == 0:
+                repo.enqueue_all_agents_for_scoring(session)
+                session.commit()
+            scored = scoring_pipeline.run_once(session)
+            if scored:
+                log.info("scoring_pipeline_tick", processed=scored)
 
             tick += 1
             time.sleep(DEFAULT_POLL_SECONDS)

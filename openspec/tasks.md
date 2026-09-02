@@ -64,9 +64,9 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
       _(`test_scoring_db.py::test_golden_score_bands`: established > sybil, established > transferred, fresh → insufficient_data)_
 
 > Note: `registration_match` is weighted heavily and the heuristic `wallet_status` lightly
-> (design note a). Group 3's `rater_credibility` view computes self-feedback by **current**
-> owner; the scoring engine supersedes it with **block-height-correct** self-feedback and
-> leaves that view unchanged (flagged for review).
+> (design note a). Group 3's `rater_credibility` view was updated (housekeeping, migration
+> `0005`) to judge self-feedback by the **owner at the feedback's block height**, consistent
+> with the scoring engine.
 
 ## Group 6 — Public API
 - [ ] 6.1 FastAPI service with endpoints per §7 (free tier), pagination, filters; OpenAPI docs published

@@ -484,16 +484,24 @@ def insert_feedback_response(
 RATER_CREDIBILITY_VIEW = "rater_credibility"
 
 # Portable SQL kept in sync with ``rater_credibility_select`` via a cross-check test.
-# Self-feedback = the rater is the current owner of the agent it rated.
+# Self-feedback = the rater was the owner of the rated agent AT THE FEEDBACK'S BLOCK HEIGHT
+# (from agent_owner_history), not the current owner — consistent with the scoring engine.
 RATER_CREDIBILITY_SQL = """
 SELECT
     f.client_address AS client_address,
     MIN(f.block_number) AS first_seen_block,
     COUNT(*) AS feedback_count,
     COUNT(DISTINCT f.agent_id) AS distinct_agents_rated,
-    SUM(CASE WHEN a.owner = f.client_address THEN 1 ELSE 0 END) AS self_feedback_count
+    SUM(
+        CASE WHEN f.client_address = (
+            SELECT h.to_address
+            FROM agent_owner_history h
+            WHERE h.agent_id = f.agent_id AND h.block_number <= f.block_number
+            ORDER BY h.block_number DESC, h.log_index DESC
+            LIMIT 1
+        ) THEN 1 ELSE 0 END
+    ) AS self_feedback_count
 FROM feedback f
-LEFT JOIN agents a ON a.agent_id = f.agent_id
 GROUP BY f.client_address
 """.strip()
 
@@ -508,8 +516,26 @@ class RaterCredibility:
 
 
 def rater_credibility_select() -> Select[Any]:
-    """The materialized-view query as a SQLAlchemy Select (single source of truth)."""
-    self_feedback = func.sum(case((Agent.owner == Feedback.client_address, 1), else_=0))
+    """The materialized-view query as a SQLAlchemy Select (single source of truth).
+
+    Self-feedback is judged by the owner of the rated agent *at the feedback's block height*
+    (a correlated lookup into ``agent_owner_history``), matching the scoring engine.
+    """
+    owner_at_block = (
+        select(AgentOwnerHistory.to_address)
+        .where(
+            AgentOwnerHistory.agent_id == Feedback.agent_id,
+            AgentOwnerHistory.block_number <= Feedback.block_number,
+        )
+        .order_by(
+            AgentOwnerHistory.block_number.desc(),
+            AgentOwnerHistory.log_index.desc(),
+        )
+        .limit(1)
+        .correlate(Feedback)
+        .scalar_subquery()
+    )
+    self_feedback = func.sum(case((Feedback.client_address == owner_at_block, 1), else_=0))
     return (
         select(
             Feedback.client_address.label("client_address"),
@@ -519,7 +545,6 @@ def rater_credibility_select() -> Select[Any]:
             self_feedback.label("self_feedback_count"),
         )
         .select_from(Feedback)
-        .outerjoin(Agent, Agent.agent_id == Feedback.agent_id)
         .group_by(Feedback.client_address)
     )
 

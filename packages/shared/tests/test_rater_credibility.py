@@ -14,6 +14,7 @@ from provenalt_shared.db import repository as repo
 OWNER_A = "0x1111111111111111111111111111111111111111"
 OWNER_B = "0x2222222222222222222222222222222222222222"
 CLIENT_C = "0x3333333333333333333333333333333333333333"
+ZERO = "0x0000000000000000000000000000000000000000"
 
 
 @pytest.fixture
@@ -24,16 +25,39 @@ def session() -> Session:
         yield s
 
 
-def _agent(s: Session, agent_id: int, owner: str) -> None:
+def _agent(s: Session, agent_id: int, owner: str, registered_block: int = 1) -> None:
     repo.upsert_agent(
         s,
         agent_id=agent_id,
         owner=owner,
         agent_uri="ipfs://x",
-        registered_block=1,
+        registered_block=registered_block,
         registered_tx_hash=f"0x{agent_id:064x}",
         registered_log_index=0,
     )
+    # Real indexing seeds a mint owner-history entry; block-height self-feedback needs it.
+    repo.append_owner_history(
+        s,
+        agent_id=agent_id,
+        from_address=ZERO,
+        to_address=owner,
+        block_number=registered_block,
+        tx_hash=f"0xmint{agent_id}",
+        log_index=0,
+    )
+
+
+def _transfer(s: Session, agent_id: int, frm: str, to: str, block: int) -> None:
+    repo.append_owner_history(
+        s,
+        agent_id=agent_id,
+        from_address=frm,
+        to_address=to,
+        block_number=block,
+        tx_hash=f"0xt{agent_id}{block}",
+        log_index=0,
+    )
+    repo.set_agent_owner(s, agent_id, to)
 
 
 def _feedback(s: Session, agent_id: int, client: str, index: int, block: int) -> None:
@@ -84,6 +108,25 @@ def test_rater_credibility_metrics(session: Session) -> None:
     assert a.feedback_count == 1
     assert a.distinct_agents_rated == 1
     assert a.self_feedback_count == 1  # rated an agent it owns
+
+
+def test_self_feedback_uses_owner_at_block_not_current_owner(session: Session) -> None:
+    """Regression: a rater who owned the agent when rating counts as self even after selling;
+    the same rater's later feedback (after transfer) does not. Current-owner logic would miss
+    the pre-transfer self-rating."""
+    _agent(session, 1, OWNER_A, registered_block=1)
+    _transfer(session, 1, OWNER_A, OWNER_B, block=200)
+    # OWNER_A rated while owning it (block 100 → self) and again after selling (block 300 → not).
+    _feedback(session, 1, OWNER_A, index=0, block=100)
+    _feedback(session, 1, OWNER_A, index=1, block=300)
+    # OWNER_B rates while owning it (block 300 → self).
+    _feedback(session, 1, OWNER_B, index=0, block=300)
+    session.commit()
+
+    rows = {r.client_address: r for r in repo.rater_credibility_rows(session)}
+    # Current owner is OWNER_B; the current-owner definition would give OWNER_A 0.
+    assert rows[OWNER_A].self_feedback_count == 1
+    assert rows[OWNER_B].self_feedback_count == 1
 
 
 def test_value_scaled_is_stored_as_numeric(session: Session) -> None:

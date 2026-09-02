@@ -11,6 +11,7 @@ Both registries share ``raw_logs``, so reorg deletions are scoped by contract ad
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -21,8 +22,11 @@ from sqlalchemy.orm import Session
 
 from provenalt_shared.db.models import (
     Agent,
+    AgentCard,
     AgentMetadata,
     AgentOwnerHistory,
+    CardDrift,
+    CardRefreshQueue,
     Feedback,
     FeedbackResponse,
     FeedbackRevocation,
@@ -32,8 +36,11 @@ from provenalt_shared.db.models import (
 
 __all__ = [
     "Agent",
+    "AgentCard",
     "AgentMetadata",
     "AgentOwnerHistory",
+    "CardDrift",
+    "CardRefreshQueue",
     "Feedback",
     "FeedbackResponse",
     "FeedbackRevocation",
@@ -67,6 +74,15 @@ __all__ = [
     "refresh_rater_credibility",
     "RATER_CREDIBILITY_VIEW",
     "RATER_CREDIBILITY_SQL",
+    "get_agent_wallet",
+    "upsert_agent_card",
+    "get_agent_card",
+    "record_card_drift",
+    "enqueue_card_refresh",
+    "list_pending_card_refresh",
+    "delete_card_refresh",
+    "agents_needing_card_refresh",
+    "enqueue_all_agents_for_refresh",
 ]
 
 
@@ -519,3 +535,134 @@ def refresh_rater_credibility(session: Session) -> None:
 
     if session.get_bind().dialect.name == "postgresql":
         session.execute(text(f"REFRESH MATERIALIZED VIEW {RATER_CREDIBILITY_VIEW}"))
+
+
+# ── agent card pipeline (proposal §4) ────────────────────────────────────────
+
+
+def get_agent_wallet(session: Session, agent_id: int) -> str | None:
+    """Return the agent's latest on-chain ``agentWallet`` (from indexed MetadataSet), or None.
+
+    The reserved ``agentWallet`` metadata value is a 20-byte address (stored as bytes); a
+    32-byte left-padded encoding is also tolerated.
+    """
+    row = session.execute(
+        select(AgentMetadata.metadata_value)
+        .where(
+            AgentMetadata.agent_id == agent_id,
+            AgentMetadata.metadata_key == "agentWallet",
+        )
+        .order_by(AgentMetadata.block_number.desc(), AgentMetadata.log_index.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    value = bytes(row)
+    if len(value) >= 20:
+        return "0x" + value[-20:].hex()
+    return None
+
+
+def upsert_agent_card(
+    session: Session,
+    *,
+    agent_id: int,
+    token_uri: str,
+    fetch_status: str,
+    http_status: int | None = None,
+    source: str | None = None,
+    content: str | None = None,
+    content_hash: str | None = None,
+    schema_valid: bool | None = None,
+    schema_errors: list[str] | None = None,
+    registration_match: bool | None = None,
+    wallet_status: str | None = None,
+) -> None:
+    """Insert or replace the latest card state for an agent (one row per agent)."""
+    card = session.get(AgentCard, agent_id)
+    if card is None:
+        card = AgentCard(agent_id=agent_id, token_uri=token_uri, fetch_status=fetch_status)
+        session.add(card)
+    card.token_uri = token_uri
+    card.fetch_status = fetch_status
+    card.http_status = http_status
+    card.source = source
+    card.content = content
+    card.content_hash = content_hash
+    card.schema_valid = schema_valid
+    card.schema_errors = schema_errors
+    card.registration_match = registration_match
+    card.wallet_status = wallet_status
+    card.fetched_at = datetime.now(UTC)
+
+
+def get_agent_card(session: Session, agent_id: int) -> AgentCard | None:
+    return session.get(AgentCard, agent_id)
+
+
+def record_card_drift(
+    session: Session,
+    *,
+    agent_id: int,
+    token_uri: str,
+    old_content_hash: str | None,
+    new_content_hash: str | None,
+) -> None:
+    session.add(
+        CardDrift(
+            agent_id=agent_id,
+            token_uri=token_uri,
+            old_content_hash=old_content_hash,
+            new_content_hash=new_content_hash,
+        )
+    )
+
+
+def enqueue_card_refresh(session: Session, agent_id: int, reason: str) -> bool:
+    """Enqueue an agent for (re)fetch. One pending entry per agent (insert-or-ignore)."""
+    return _insert_ignore(
+        session,
+        CardRefreshQueue,
+        {"agent_id": agent_id, "reason": reason, "attempts": 0},
+        ["agent_id"],
+    )
+
+
+def list_pending_card_refresh(session: Session, limit: int = 100) -> list[CardRefreshQueue]:
+    return list(
+        session.execute(
+            select(CardRefreshQueue).order_by(CardRefreshQueue.enqueued_at).limit(limit)
+        ).scalars()
+    )
+
+
+def delete_card_refresh(session: Session, agent_id: int) -> None:
+    entry = session.get(CardRefreshQueue, agent_id)
+    if entry is not None:
+        session.delete(entry)
+
+
+def agents_needing_card_refresh(session: Session) -> list[tuple[int, str]]:
+    """Agents that should be (re)fetched: never fetched (``new_agent``) or whose current
+    ``agent_uri`` differs from the last-fetched ``token_uri`` (``uri_updated``)."""
+    result: list[tuple[int, str]] = []
+    rows = session.execute(
+        select(Agent.agent_id, Agent.agent_uri, AgentCard.token_uri).outerjoin(
+            AgentCard, AgentCard.agent_id == Agent.agent_id
+        )
+    ).all()
+    for agent_id, agent_uri, card_uri in rows:
+        if card_uri is None:
+            result.append((agent_id, "new_agent"))
+        elif agent_uri != card_uri:
+            result.append((agent_id, "uri_updated"))
+    return result
+
+
+def enqueue_all_agents_for_refresh(session: Session, reason: str = "periodic") -> int:
+    """Enqueue every known agent (periodic sweep). Returns the number newly enqueued."""
+    enqueued = 0
+    for agent_id in all_agent_ids(session):
+        if enqueue_card_refresh(session, agent_id, reason):
+            enqueued += 1
+    return enqueued

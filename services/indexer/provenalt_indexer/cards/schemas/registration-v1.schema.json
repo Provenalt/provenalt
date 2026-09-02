@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://provenalt.dev/schemas/erc8004/registration-v1.schema.json",
+  "title": "ERC-8004 Agent Registration File (registration-v1)",
+  "description": "Vendored, versioned JSON Schema for the ERC-8004 agent registration file that agentURI resolves to. Transcribed from the normative structure in ERC8004SPEC.md (type https://eips.ethereum.org/EIPS/eip-8004#registration-v1). Provenalt schema version: 1. Only the clearly-normative constraints are enforced (type + registrations); recommended fields are described but not required, and unknown fields are permitted (additionalProperties=true), since endpoints/services are explicitly extensible.",
+  "type": "object",
+  "required": ["type", "registrations"],
+  "additionalProperties": true,
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1"
+    },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "image": { "type": "string" },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "endpoint"],
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "endpoint": { "type": "string" },
+          "version": { "type": "string" }
+        }
+      }
+    },
+    "x402Support": { "type": "boolean" },
+    "active": { "type": "boolean" },
+    "registrations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["agentId", "agentRegistry"],
+        "additionalProperties": true,
+        "properties": {
+          "agentId": { "type": "integer", "minimum": 0 },
+          "agentRegistry": { "type": "string" }
+        }
+      }
+    },
+    "supportedTrust": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

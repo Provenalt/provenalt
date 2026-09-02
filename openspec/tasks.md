@@ -40,10 +40,16 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
       against the Core select; `refresh_rater_credibility` refreshes it)_
 
 ## Group 4 — Agent Card pipeline
-- [ ] 4.1 Fetch tokenURI content (ipfs:// via ≥2 gateways with fallback, https:// direct); store content + content hash + fetch status
-- [ ] 4.2 Validate against official Agent Card JSON schema (vendored copy, versioned); record validity + errors
-- [ ] 4.3 Refresh queue: re-fetch on `URIUpdated` + periodic sweep; drift log when content hash changes without URI change
-- [ ] 4.4 Consistency checks: `agentWallet` metadata vs card contents
+- [x] 4.1 Fetch tokenURI content (ipfs:// via ≥2 gateways with fallback, https:// direct); store content + content hash + fetch status
+      _(also handles `data:` base64 URIs per the spec; `cards/fetch.py`, injectable httpx client; sha256 content hash)_
+- [x] 4.2 Validate against official Agent Card JSON schema (vendored copy, versioned); record validity + errors
+      _(schema authored from the EIP-8004 registration-v1 normative structure — no published JSON Schema exists —
+      vendored at `cards/schemas/registration-v1.schema.json`, SCHEMA_VERSION=1)_
+- [x] 4.3 Refresh queue: re-fetch on `URIUpdated` + periodic sweep; drift log when content hash changes without URI change
+      _(`card_refresh_queue`; queue fed from agents with no card or a changed `agent_uri`; `card_drift` table + worker sweep)_
+- [x] 4.4 Consistency checks: `agentWallet` metadata vs card contents
+      _(agentWallet from indexed MetadataSet vs addresses declared in the card; plus registrations[] binding to agent+registry;
+      migration `0003`: `agent_cards`, `card_drift`, `card_refresh_queue`)_
 
 ## Group 5 — Scoring engine v1
 - [ ] 5.1 Implement components per §6 as pure functions over DB state; weights in config

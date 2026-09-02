@@ -3,8 +3,11 @@
 from provenalt_shared.db.base import Base, make_engine, make_session_factory
 from provenalt_shared.db.models import (
     Agent,
+    AgentCard,
     AgentMetadata,
     AgentOwnerHistory,
+    CardDrift,
+    CardRefreshQueue,
     Feedback,
     FeedbackResponse,
     FeedbackRevocation,
@@ -17,8 +20,11 @@ __all__ = [
     "make_engine",
     "make_session_factory",
     "Agent",
+    "AgentCard",
     "AgentMetadata",
     "AgentOwnerHistory",
+    "CardDrift",
+    "CardRefreshQueue",
     "Feedback",
     "FeedbackResponse",
     "FeedbackRevocation",

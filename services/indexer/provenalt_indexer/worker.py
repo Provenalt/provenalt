@@ -19,6 +19,8 @@ from provenalt_shared.settings import get_settings
 from sqlalchemy.orm import Session
 
 from provenalt_indexer.backfill import IngestFn, backfill
+from provenalt_indexer.cards import pipeline as card_pipeline
+from provenalt_indexer.cards.fetch import CardFetcher
 from provenalt_indexer.deploy_block import find_deployment_block
 from provenalt_indexer.follow import follow_once
 from provenalt_indexer.projection import ingest_logs
@@ -27,6 +29,8 @@ from provenalt_indexer.registries import REGISTRIES
 # Kept for backwards compatibility with earlier tests/wiring.
 REGISTRY_NAME = "identity"
 DEFAULT_POLL_SECONDS = 5.0
+# How often (in poll ticks) to run a full periodic card-refresh sweep.
+CARD_SWEEP_EVERY_TICKS = 720
 
 log = get_logger("indexer.worker")
 
@@ -104,6 +108,7 @@ def main() -> None:  # pragma: no cover - long-running process wiring
         min_chunk=settings.getlogs_min_chunk,
         max_chunk=settings.getlogs_max_chunk,
     )
+    card_fetcher = CardFetcher()
 
     with session_factory() as session:
         for cfg in REGISTRIES:
@@ -119,6 +124,7 @@ def main() -> None:  # pragma: no cover - long-running process wiring
             )
 
         log.info("entering_head_follow", finality_depth=settings.finality_depth)
+        tick = 0
         while True:
             for cfg in REGISTRIES:
                 head = follow_once(
@@ -132,6 +138,17 @@ def main() -> None:  # pragma: no cover - long-running process wiring
                     rewind_fn=cfg.rewind_fn,
                 )
                 log.info("head_follow_tick", registry=cfg.name, head=head)
+
+            # Agent-card pipeline: process any (re)fetches triggered by new agents or
+            # URIUpdated events; run a periodic full sweep occasionally.
+            if tick % CARD_SWEEP_EVERY_TICKS == 0:
+                repo.enqueue_all_agents_for_refresh(session)
+                session.commit()
+            processed = card_pipeline.run_once(session, card_fetcher)
+            if processed:
+                log.info("card_pipeline_tick", processed=processed)
+
+            tick += 1
             time.sleep(DEFAULT_POLL_SECONDS)
 
 

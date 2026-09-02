@@ -184,6 +184,57 @@ class FeedbackResponse(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class AgentCard(Base):
+    """Latest agent-card state per agent (proposal §4): fetch result, content hash,
+    schema validity, and agentWallet/registration consistency."""
+
+    __tablename__ = "agent_cards"
+
+    agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    token_uri: Mapped[str] = mapped_column(String, nullable=False)
+    # ok | fetch_error | unsupported_scheme | empty
+    fetch_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    content: Mapped[str | None] = mapped_column(String, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    schema_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    schema_errors: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    registration_match: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # match | mismatch | not_declared | wallet_not_set
+    wallet_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class CardDrift(Base):
+    """Append-only log: content hash changed while the tokenURI stayed the same (§4.3)."""
+
+    __tablename__ = "card_drift"
+    __table_args__ = (Index("ix_card_drift_agent_id", "agent_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    token_uri: Mapped[str] = mapped_column(String, nullable=False)
+    old_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class CardRefreshQueue(Base):
+    """Pending card (re)fetch work (§4.3). One pending entry per agent (PK = agent_id)."""
+
+    __tablename__ = "card_refresh_queue"
+
+    agent_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    # new_agent | uri_updated | periodic
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class IndexerCursor(Base):
     __tablename__ = "indexer_cursor"
 

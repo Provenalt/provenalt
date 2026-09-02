@@ -8,6 +8,8 @@ dependencies = [
     "eth-abi>=5.1",
     "eth-utils>=4.1",
     "eth-hash[pycryptodome]>=0.7",
+    "httpx>=0.27",
+    "jsonschema>=4.20",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +30,7 @@ build-backend = "setuptools.build_meta"
 include = ["provenalt_indexer*"]
 
 [tool.setuptools.package-data]
-provenalt_indexer = ["abis/*.json"]
+provenalt_indexer = ["abis/*.json", "cards/schemas/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not integration'"
@@ -55,4 +57,9 @@ mypy_path = "../../packages/shared"
 [[tool.mypy.overrides]]
 module = ["eth_abi.*", "eth_utils.*"]
 follow_imports = "skip"
+ignore_missing_imports = true
+
+# jsonschema does not ship type stubs in this environment.
+[[tool.mypy.overrides]]
+module = ["jsonschema.*"]
 ignore_missing_imports = true

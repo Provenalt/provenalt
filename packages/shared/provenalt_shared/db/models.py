@@ -263,6 +263,19 @@ class ScoreRefreshQueue(Base):
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class B20Token(Base):
+    """Registry of known B20 tokenized-stock contracts (proposal §7.2), extensible as more
+    stocks land. Addresses are stored lowercased."""
+
+    __tablename__ = "b20_tokens"
+
+    address: Mapped[str] = mapped_column(String(42), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    decimals: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class ApiKey(Base):
     """Partner API key for bypassing the free-tier rate limit (proposal §6.2).
 

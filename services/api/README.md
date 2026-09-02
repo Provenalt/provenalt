@@ -12,10 +12,15 @@ Endpoints (proposal §7, free tier — per-IP rate limited, partner API keys byp
 - `GET /v1/agents/{agent_id}` — identity + card + metadata + owner history (+ score summary).
 - `GET /v1/agents/{agent_id}/feedback` — feedback timeline (with revoked/responded flags).
 - `GET /v1/stats` — registry totals + per-registry indexer position.
+- `GET /v1/eligibility?wallet=&token=` — B20 tokenized-stock eligibility (native
+  PolicyRegistry `isAuthorized`) + multiplier-aware raw/adjusted balances (Group 7). The B20
+  token registry is seeded in migration `0007`; the on-chain ABI is documented in
+  [`docs/b20-eligibility.md`](../../docs/b20-eligibility.md).
 - `GET /healthz` — liveness. OpenAPI at `/openapi.json`, Swagger UI at `/docs`.
 
-The x402-gated endpoints (`/v1/agents/{id}/score`, `/v1/provenalt/{id}`, `/v1/eligibility`)
-are added in Groups 7 & 9 per the proposal's tier split.
+The remaining x402-gated endpoints (`/v1/agents/{id}/score`, `/v1/provenalt/{id}`) are added
+in Group 9; x402 gating of `/v1/eligibility` also lands in Group 9 (it is per-IP rate limited
+for now).
 
 **Rate limiting** (`ratelimit.py`): in-memory per-IP sliding window (configurable via
 `PROVENALT_API_RATE_LIMIT_*`). A valid `X-API-Key` (checked against the hashed `api_keys`

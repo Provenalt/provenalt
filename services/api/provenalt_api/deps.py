@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
+from provenalt_shared.chain import ChainClient, HttpxTransport
 from provenalt_shared.db import make_engine, make_session_factory
 from provenalt_shared.settings import get_settings
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,3 +29,23 @@ def get_session() -> Iterator[Session]:
 
 # Idiomatic FastAPI dependency alias (avoids `Depends()` in argument defaults).
 SessionDep = Annotated[Session, Depends(get_session)]
+
+
+@lru_cache(maxsize=1)
+def _chain_client() -> ChainClient:
+    settings = get_settings()
+    return ChainClient(
+        rpc_urls=settings.rpc_urls,
+        transport=HttpxTransport(),
+        initial_chunk=settings.getlogs_initial_chunk,
+        min_chunk=settings.getlogs_min_chunk,
+        max_chunk=settings.getlogs_max_chunk,
+    )
+
+
+def get_chain() -> ChainClient:
+    """The Base RPC chain client (overridden in tests via dependency_overrides)."""
+    return _chain_client()
+
+
+ChainDep = Annotated[ChainClient, Depends(get_chain)]

@@ -82,9 +82,16 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
       to the operator, like Group 1.2)_
 
 ## Group 7 — Eligibility module (B20, native)
-- [ ] 7.1 Chain-level `isAuthorized` precompile client (research exact call ABI from official B20 technical docs at base.org/stocks; document findings in repo)
-- [ ] 7.2 `/v1/eligibility?wallet=&token=` for the 4 live stock contracts (registry of known B20 tokens in DB, extensible as more stocks land)
-- [ ] 7.3 Multiplier-aware balance reader (dividends/splits multiplier — report both raw and adjusted balance)
+- [x] 7.1 Chain-level `isAuthorized` precompile client (research exact call ABI from official B20 technical docs at base.org/stocks; document findings in repo)
+      _(researched from docs.base.org B20 spec → `docs/b20-eligibility.md` (sources + verbatim ABI);
+      `provenalt_api/b20.py` — PolicyRegistry `0x8453…0002`, `isAuthorized(uint64,address)`,
+      token `policyId(bytes32)`; selectors + `keccak256` scope hashes COMPUTED, cross-checked in tests
+      and confirmed against live Base)_
+- [x] 7.2 `/v1/eligibility?wallet=&token=` for the 4 live stock contracts (registry of known B20 tokens in DB, extensible as more stocks land)
+      _(`b20_tokens` table + migration `0007` seeding AAPLc/NVDAc/GOOGLc/METAc; endpoint resolves token by
+      address or symbol, 404 if unknown; per-IP rate limited (x402 gating → Group 9))_
+- [x] 7.3 Multiplier-aware balance reader (dividends/splits multiplier — report both raw and adjusted balance)
+      _(reports raw `balanceOf` and adjusted `scaledBalanceOf` + the WAD `multiplier()`)_
 
 ## Group 8 — Explorer (web MVP)
 - [ ] 8.1 Next.js app: home (registry stats + growth chart), search, agent profile page (card, score breakdown, feedback timeline, owner history)

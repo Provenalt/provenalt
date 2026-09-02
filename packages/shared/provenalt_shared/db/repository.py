@@ -28,6 +28,7 @@ from provenalt_shared.db.models import (
     AgentOwnerHistory,
     AgentScore,
     ApiKey,
+    B20Token,
     CardDrift,
     CardRefreshQueue,
     Feedback,
@@ -98,6 +99,9 @@ __all__ = [
     "api_key_hash",
     "create_api_key",
     "is_valid_api_key",
+    "upsert_b20_token",
+    "get_b20_token",
+    "list_b20_tokens",
 ]
 
 
@@ -844,3 +848,35 @@ def is_valid_api_key(session: Session, plaintext: str) -> bool:
         select(ApiKey.active).where(ApiKey.key_hash == api_key_hash(plaintext))
     ).scalar_one_or_none()
     return bool(row)
+
+
+# ── B20 token registry (proposal §7.2) ───────────────────────────────────────
+
+
+def upsert_b20_token(
+    session: Session, address: str, symbol: str, decimals: int, active: bool = True
+) -> None:
+    token = session.get(B20Token, address.lower())
+    if token is None:
+        token = B20Token(address=address.lower(), symbol=symbol, decimals=decimals)
+        session.add(token)
+    token.symbol = symbol
+    token.decimals = decimals
+    token.active = active
+
+
+def get_b20_token(session: Session, key: str) -> B20Token | None:
+    """Resolve a known, active B20 token by contract address or symbol (case-insensitive)."""
+    return session.execute(
+        select(B20Token).where(
+            B20Token.active.is_(True),
+            (B20Token.address == key.lower()) | (B20Token.symbol == key),
+        )
+    ).scalar_one_or_none()
+
+
+def list_b20_tokens(session: Session, active_only: bool = True) -> list[B20Token]:
+    stmt = select(B20Token).order_by(B20Token.symbol)
+    if active_only:
+        stmt = stmt.where(B20Token.active.is_(True))
+    return list(session.execute(stmt).scalars())

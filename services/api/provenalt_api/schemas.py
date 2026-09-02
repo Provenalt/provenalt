@@ -100,3 +100,21 @@ class Stats(BaseModel):
     total_scored: int
     total_cards: int
     registries: list[RegistryStatus]
+
+
+class EligibilityResponse(BaseModel):
+    """B20 eligibility + multiplier-aware balances. Large integers (uint64/uint256) are
+    returned as strings to avoid JSON/JS precision loss."""
+
+    token_address: str
+    symbol: str
+    decimals: int
+    wallet: str
+    can_hold: bool
+    can_send: bool
+    eligible: bool
+    receiver_policy_id: str
+    sender_policy_id: str
+    raw_balance: str
+    adjusted_balance: str
+    multiplier: str

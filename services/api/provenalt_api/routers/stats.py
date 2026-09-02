@@ -9,7 +9,7 @@ from provenalt_shared.db import IndexerCursor
 
 from provenalt_api import queries
 from provenalt_api.deps import SessionDep
-from provenalt_api.schemas import RegistryStatus, Stats
+from provenalt_api.schemas import GrowthPoint, RegistryStatus, Stats
 
 router = APIRouter(prefix="/v1", tags=["stats"])
 
@@ -18,6 +18,7 @@ router = APIRouter(prefix="/v1", tags=["stats"])
 def get_stats(session: SessionDep) -> Stats:
     data = queries.stats(session)
     cursors = cast(list[IndexerCursor], data["cursors"])
+    growth = cast(list[tuple[int, int]], data["growth"])
     return Stats(
         total_agents=cast(int, data["total_agents"]),
         max_agent_id=cast("int | None", data["max_agent_id"]),
@@ -32,4 +33,5 @@ def get_stats(session: SessionDep) -> Stats:
             )
             for c in cursors
         ],
+        growth=[GrowthPoint(block=b, cumulative_agents=c) for b, c in growth],
     )

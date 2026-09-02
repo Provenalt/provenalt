@@ -94,9 +94,17 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
       _(reports raw `balanceOf` and adjusted `scaledBalanceOf` + the WAD `multiplier()`)_
 
 ## Group 8 — Explorer (web MVP)
-- [ ] 8.1 Next.js app: home (registry stats + growth chart), search, agent profile page (card, score breakdown, feedback timeline, owner history)
-- [ ] 8.2 Methodology page (renders METHODOLOGY.md); About page
-- [ ] 8.3 Deploy to Vercel, custom domain, OG images for agent pages (shareable on X)
+- [x] 8.1 Next.js app: home (registry stats + growth chart), search, agent profile page (card, score breakdown, feedback timeline, owner history)
+      _(`web/` Next.js App Router; dark technical design via the ui-ux-pro-max skill (Fira Code/Fira Sans,
+      slate + trust-blue, verdict bands); hand-rolled SVG growth chart from a new `/v1/stats.growth` series;
+      score "breakdown" shown as the published composition/weights — the per-agent numeric breakdown stays
+      behind the x402-gated /score endpoint per §7)_
+- [x] 8.2 Methodology page (renders METHODOLOGY.md); About page
+      _(methodology renders the repo-root `METHODOLOGY.md` via react-markdown + remark-gfm)_
+- [x] 8.3 Deploy to Vercel, custom domain, OG images for agent pages (shareable on X)
+      _(dynamic per-agent OG image at `/agents/[id]/opengraph-image` (renders a PNG); Vercel/root/domain
+      steps documented in `infra/README.md` and `web/README.md`; actual deploy deferred to the operator
+      like Group 1.2/6.3)_
 
 ## Group 9 — Monetized distribution
 - [ ] 9.1 x402 integration on gated endpoints (USDC on Base, per-call pricing; start $0.01/call) — follow docs.cdp.coinbase.com x402 seller flow

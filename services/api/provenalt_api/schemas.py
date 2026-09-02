@@ -93,6 +93,11 @@ class RegistryStatus(BaseModel):
     last_indexed_block: int
 
 
+class GrowthPoint(BaseModel):
+    block: int
+    cumulative_agents: int
+
+
 class Stats(BaseModel):
     total_agents: int
     max_agent_id: int | None
@@ -100,6 +105,7 @@ class Stats(BaseModel):
     total_scored: int
     total_cards: int
     registries: list[RegistryStatus]
+    growth: list[GrowthPoint]
 
 
 class EligibilityResponse(BaseModel):

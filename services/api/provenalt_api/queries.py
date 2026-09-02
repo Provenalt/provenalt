@@ -15,7 +15,7 @@ from provenalt_shared.db import (
     FeedbackRevocation,
     IndexerCursor,
 )
-from sqlalchemy import func, select
+from sqlalchemy import Integer, cast, func, select
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -108,6 +108,39 @@ def list_feedback(
     return rows, int(total), revoked, responded
 
 
+def growth_series(session: Session, buckets: int = 24) -> list[tuple[int, int]]:
+    """Cumulative registered-agent count bucketed by registration block (registry growth, §7).
+
+    Returns ``[(block, cumulative_agents), ...]`` — a compact series derived from
+    ``agents.registered_block`` (no timestamps needed).
+    """
+    lo, hi, total = session.execute(
+        select(
+            func.min(Agent.registered_block),
+            func.max(Agent.registered_block),
+            func.count(),
+        ).select_from(Agent)
+    ).one()
+    if not total or lo is None or hi is None:
+        return []
+    if hi == lo:
+        return [(int(hi), int(total))]
+
+    width = max(1, (int(hi) - int(lo)) // buckets)
+    bucket = cast((Agent.registered_block - lo) / width, Integer)
+    rows = session.execute(
+        select(bucket.label("b"), func.count()).group_by(bucket).order_by(bucket)
+    ).all()
+
+    out: list[tuple[int, int]] = []
+    cumulative = 0
+    for b, count in rows:
+        cumulative += int(count)
+        block_end = min(int(lo) + (int(b) + 1) * width, int(hi))
+        out.append((block_end, cumulative))
+    return out
+
+
 def stats(session: Session) -> dict[str, object]:
     total_agents = session.execute(select(func.count()).select_from(Agent)).scalar_one()
     max_agent_id = session.execute(select(func.max(Agent.agent_id))).scalar_one_or_none()
@@ -124,4 +157,5 @@ def stats(session: Session) -> dict[str, object]:
         "total_scored": int(total_scored),
         "total_cards": int(total_cards),
         "cursors": cursors,
+        "growth": growth_series(session),
     }

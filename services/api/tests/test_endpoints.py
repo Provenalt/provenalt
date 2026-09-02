@@ -104,8 +104,9 @@ def test_feedback_timeline_404_for_unknown_agent(client: TestClient) -> None:
 
 
 def test_stats(session: Session, client: TestClient) -> None:
-    seed.add_agent(session, 1, OWNER_A)
-    seed.add_agent(session, 2, OWNER_B)
+    # agents registered across a range of blocks so the growth series has multiple points.
+    for i in range(1, 6):
+        seed.add_agent(session, i, OWNER_A if i % 2 else OWNER_B, block=i * 1000)
     seed.add_card(session, 1)
     seed.add_score(session, 1, score=50)
     seed.add_feedback(session, 1, CLIENT, index=0, block=100)
@@ -113,11 +114,17 @@ def test_stats(session: Session, client: TestClient) -> None:
     session.commit()
 
     body = client.get("/v1/stats").json()
-    assert body["total_agents"] == 2
-    assert body["max_agent_id"] == 2
+    assert body["total_agents"] == 5
+    assert body["max_agent_id"] == 5
     assert body["total_feedback"] == 1
     assert body["total_scored"] == 1
     assert body["total_cards"] == 1
     assert body["registries"] == [
         {"registry": "identity", "anchor_block": 10, "last_indexed_block": 999}
     ]
+    # growth is a cumulative, non-decreasing series ending at the total agent count.
+    growth = body["growth"]
+    assert growth, "expected a non-empty growth series"
+    cumulatives = [p["cumulative_agents"] for p in growth]
+    assert cumulatives == sorted(cumulatives)
+    assert cumulatives[-1] == 5

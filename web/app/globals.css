@@ -1,0 +1,135 @@
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Dark, technical, trustworthy — deliberately not a neon crypto template.
+     Stored as "R G B" channels so Tailwind opacity modifiers (bg-accent/10) work;
+     use rgb(var(--x)) for full-opacity inline styles (SVG strokes etc.). */
+  --bg: 10 12 16;
+  --panel: 18 21 27;
+  --panel-2: 23 27 35;
+  --border: 35 42 52;
+  --border-strong: 46 54 68;
+  --fg: 231 235 242;
+  --fg-muted: 154 163 180;
+  --fg-faint: 107 115 130;
+  --accent: 76 134 240;
+  --accent-fg: 220 232 255;
+
+  /* Trust-verdict bands for the score. */
+  --pass: 70 185 138;
+  --warn: 224 166 60;
+  --fail: 229 86 75;
+  --none: 122 131 149;
+
+  --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, "SFMono-Regular", "Menlo", monospace;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply bg-bg text-fg;
+    font-family: var(--font-sans);
+    /* Tabular figures everywhere — data must not jitter. */
+    font-variant-numeric: tabular-nums;
+    background-image: radial-gradient(
+      60rem 40rem at 50% -10rem,
+      rgba(76, 134, 240, 0.06),
+      transparent 70%
+    );
+  }
+  ::selection {
+    background: rgba(76, 134, 240, 0.28);
+  }
+  a {
+    @apply transition-colors duration-150;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-eyebrow font-mono font-medium uppercase text-fg-faint;
+  }
+  .panel {
+    @apply rounded-lg border border-border bg-panel;
+  }
+  .hairline {
+    @apply border-border;
+  }
+  .mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Markdown rendering (methodology). Controlled, on-brand typography. */
+.prose-md {
+  @apply max-w-prose text-fg-muted;
+}
+.prose-md h1 {
+  @apply mb-4 mt-0 text-2xl font-600 tracking-tight text-fg;
+}
+.prose-md h2 {
+  @apply mb-3 mt-10 border-b border-border pb-2 text-lg font-600 text-fg;
+}
+.prose-md h3 {
+  @apply mb-2 mt-6 text-base font-600 text-fg;
+}
+.prose-md p {
+  @apply my-3 leading-7;
+}
+.prose-md a {
+  @apply text-accent hover:text-accent-fg;
+}
+.prose-md strong {
+  @apply font-600 text-fg;
+}
+.prose-md code {
+  @apply mono rounded bg-panel-2 px-1.5 py-0.5 text-[0.85em] text-fg;
+}
+.prose-md ul {
+  @apply my-3 list-disc space-y-1.5 pl-5;
+}
+.prose-md ol {
+  @apply my-3 list-decimal space-y-1.5 pl-5;
+}
+.prose-md blockquote {
+  @apply my-4 border-l-2 border-border-strong pl-4 text-fg-faint;
+}
+.prose-md hr {
+  @apply my-8 border-border;
+}
+.prose-md table {
+  @apply my-4 w-full border-collapse text-sm;
+}
+.prose-md th {
+  @apply border-b border-border px-3 py-2 text-left font-600 text-fg;
+}
+.prose-md td {
+  @apply border-b border-border/60 px-3 py-2 align-top;
+}
+.prose-md table code {
+  @apply text-xs;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

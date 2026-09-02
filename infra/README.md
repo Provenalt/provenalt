@@ -71,11 +71,19 @@ Create one Railway **project** for Provenalt. Inside it, provision:
 
 ## 2. Vercel — web (Next.js explorer)
 
-- Create a Vercel **project** linked to this repo, **root directory `web/`**.
-- Framework preset: Next.js.
+- Create a Vercel **project** linked to this repo. Framework preset: Next.js.
+- **Root directory:** the explorer reads the repo-root `METHODOLOGY.md` at build. Either:
+  - set Root Directory to the **repo root** with build command
+    `npm --prefix web ci && npm --prefix web run build` and output `web/.next`; or
+  - set Root Directory to `web/` and ensure `METHODOLOGY.md` is reachable (the methodology
+    page falls back gracefully if it is not).
 - **Env vars to set** (names from `.env.example`):
   - `NEXT_PUBLIC_API_BASE_URL` → the Railway `api` service public URL.
-- The Next.js app itself is built in Group 8; the Vercel project can be created earlier.
+- **OG images:** per-agent social cards are served dynamically at
+  `/agents/{id}/opengraph-image` (no extra config).
+- **Custom domain:** attach the chosen brand domain to this project (Open Question #1).
+- Pages that read the API are dynamic and degrade gracefully when the API is unreachable, so
+  a first deploy succeeds even before the API is live.
 
 ---
 

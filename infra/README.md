@@ -38,15 +38,34 @@ Create one Railway **project** for Provenalt. Inside it, provision:
 ### 1.3 Service: `api` (request/response)
 - **Root directory:** `services/api`
 - **Runtime profile:** request/response HTTP service; Railway assigns a public domain.
-- **Start command:** the FastAPI entrypoint (defined in Group 6). Placeholder for now.
-- **Env vars to set:** same core + chain vars as the indexer, plus API-specific vars
-  introduced in Groups 6/9 (rate limits, API keys, x402 config) when those groups land.
+- **Start command:** `uvicorn provenalt_api.main:app --host 0.0.0.0 --port $PORT`
+- **Pre-deploy / release command:** apply migrations before starting —
+  `cd packages/shared && alembic upgrade head` (see §1.5).
+- **Env vars to set** (names from `.env.example`):
+  - `DATABASE_URL` (reference the Postgres plugin)
+  - `PROVENALT_ENVIRONMENT=production`, `PROVENALT_LOG_LEVEL=INFO`, `PROVENALT_LOG_FORMAT=json`
+  - `PROVENALT_API_RATE_LIMIT_REQUESTS`, `PROVENALT_API_RATE_LIMIT_WINDOW_SECONDS`
+  - `PROVENALT_API_DEFAULT_PAGE_SIZE`, `PROVENALT_API_MAX_PAGE_SIZE`
+  - x402 config arrives in Group 9.
+- **Partner API keys:** created out-of-band and stored **hashed** in the `api_keys` table
+  (`repository.create_api_key`); the plaintext is shown once and never persisted. Partners
+  send it via the `X-API-Key` header to bypass the free-tier rate limit.
+- **Docs:** OpenAPI at `/openapi.json`, Swagger UI at `/docs`; liveness at `/healthz`.
+- **Smoke test** after deploy (read-only):
+  `DATABASE_URL=... pytest -m integration` from `services/api` (hits `/healthz`, `/v1/stats`,
+  `/v1/agents`).
 
 > The indexer and api are **separate services on purpose** — different runtime profiles
 > (long-running vs request/response) and independent deploys (proposal §4).
 
 ### 1.4 Deploy gating
 - Configure deploys to require green CI (see `.github/workflows/ci.yml`). No deploy on red.
+
+### 1.5 Database migrations
+- The schema lives in Alembic migrations under `packages/shared/migrations`. Apply them
+  with `DATABASE_URL=... alembic upgrade head` (run from `packages/shared`).
+- Run this as a Railway **release/pre-deploy command** for the services that need the schema
+  (at minimum the `api`), so migrations are applied before new code serves traffic.
 
 ---
 

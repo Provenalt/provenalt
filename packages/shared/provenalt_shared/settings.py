@@ -52,6 +52,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DATABASE_URL", "PROVENALT_DATABASE_URL"),
     )
 
+    # Public API — per-IP rate limit for the free tier (API keys bypass it).
+    api_rate_limit_requests: int = 60
+    api_rate_limit_window_seconds: int = 60
+    api_default_page_size: int = 50
+    api_max_page_size: int = 200
+
     @field_validator("rpc_urls", mode="before")
     @classmethod
     def _split_rpc_urls(cls, value: object) -> object:

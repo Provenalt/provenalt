@@ -10,6 +10,7 @@ Both registries share ``raw_logs``, so reorg deletions are scoped by contract ad
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -26,6 +27,7 @@ from provenalt_shared.db.models import (
     AgentMetadata,
     AgentOwnerHistory,
     AgentScore,
+    ApiKey,
     CardDrift,
     CardRefreshQueue,
     Feedback,
@@ -93,6 +95,9 @@ __all__ = [
     "delete_score_refresh",
     "agents_needing_score_refresh",
     "enqueue_all_agents_for_scoring",
+    "api_key_hash",
+    "create_api_key",
+    "is_valid_api_key",
 ]
 
 
@@ -811,3 +816,31 @@ def enqueue_all_agents_for_scoring(session: Session, reason: str = "periodic") -
         if enqueue_score_refresh(session, agent_id, reason):
             enqueued += 1
     return enqueued
+
+
+# ── API keys (proposal §6.2) ─────────────────────────────────────────────────
+
+
+def api_key_hash(plaintext: str) -> str:
+    """SHA-256 hex of an API key. Only the hash is ever stored."""
+    return hashlib.sha256(plaintext.encode()).hexdigest()
+
+
+def create_api_key(session: Session, plaintext: str, label: str = "") -> None:
+    """Store an API key by hash (idempotent on the hash). The plaintext is never persisted."""
+    _insert_ignore(
+        session,
+        ApiKey,
+        {"key_hash": api_key_hash(plaintext), "label": label, "active": True},
+        ["key_hash"],
+    )
+
+
+def is_valid_api_key(session: Session, plaintext: str) -> bool:
+    """True iff the key exists and is active."""
+    if not plaintext:
+        return False
+    row = session.execute(
+        select(ApiKey.active).where(ApiKey.key_hash == api_key_hash(plaintext))
+    ).scalar_one_or_none()
+    return bool(row)

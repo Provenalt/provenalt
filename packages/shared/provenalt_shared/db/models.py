@@ -263,6 +263,23 @@ class ScoreRefreshQueue(Base):
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class ApiKey(Base):
+    """Partner API key for bypassing the free-tier rate limit (proposal §6.2).
+
+    Only the SHA-256 hash of the key is stored — the plaintext key is shown once at
+    creation and never persisted (repo ``CLAUDE.md``: no secrets in the DB either).
+    """
+
+    __tablename__ = "api_keys"
+    __table_args__ = (UniqueConstraint("key_hash", name="uq_api_keys_key_hash"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False, default="")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class IndexerCursor(Base):
     __tablename__ = "indexer_cursor"
 

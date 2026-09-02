@@ -69,9 +69,17 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
 > with the scoring engine.
 
 ## Group 6 — Public API
-- [ ] 6.1 FastAPI service with endpoints per §7 (free tier), pagination, filters; OpenAPI docs published
-- [ ] 6.2 Rate limiting (per-IP for free tier) + API keys table
-- [ ] 6.3 Deploy to Railway; smoke tests against production DB
+- [x] 6.1 FastAPI service with endpoints per §7 (free tier), pagination, filters; OpenAPI docs published
+      _(`services/api`: `/v1/agents` (paginated + `owner` filter), `/v1/agents/{id}`,
+      `/v1/agents/{id}/feedback`, `/v1/stats`; OpenAPI at `/openapi.json`, Swagger at `/docs`.
+      x402-gated score/provenalt/eligibility deferred to Groups 7 & 9 per the §7 tier split.)_
+- [x] 6.2 Rate limiting (per-IP for free tier) + API keys table
+      _(in-memory sliding-window per-IP limiter; `api_keys` table (migration `0006`, hash-only)
+      with `X-API-Key` bypass)_
+- [x] 6.3 Deploy to Railway; smoke tests against production DB
+      _(smoke test `test_smoke_integration.py` (integration-marked, read-only) + uvicorn start
+      command and release/migration docs in `infra/README.md`; actual Railway deploy deferred
+      to the operator, like Group 1.2)_
 
 ## Group 7 — Eligibility module (B20, native)
 - [ ] 7.1 Chain-level `isAuthorized` precompile client (research exact call ABI from official B20 technical docs at base.org/stocks; document findings in repo)

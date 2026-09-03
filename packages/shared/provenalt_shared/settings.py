@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     api_default_page_size: int = 50
     api_max_page_size: int = 200
 
+    # x402 payment gating for the paid tier (score / provenalt / eligibility).
+    # Disabled by default; enforcement requires a receiving wallet (never committed).
+    x402_enabled: bool = False
+    x402_pay_to: str | None = None
+    x402_network: str = "eip155:8453"  # Base mainnet (eip155:84532 = Base Sepolia)
+    x402_price: str = "$0.01"
+    x402_facilitator_url: str = "https://x402.org/facilitator"
+
     @field_validator("rpc_urls", mode="before")
     @classmethod
     def _split_rpc_urls(cls, value: object) -> object:

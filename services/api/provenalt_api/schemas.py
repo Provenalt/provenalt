@@ -108,6 +108,27 @@ class Stats(BaseModel):
     growth: list[GrowthPoint]
 
 
+class ScoreDetail(BaseModel):
+    """Full score with the per-component breakdown (x402-gated tier, §7)."""
+
+    agent_id: int
+    score: int | None
+    confidence: str
+    sufficient: bool
+    weights_version: str
+    as_of_block: int
+    breakdown: list[dict[str, object]]
+
+
+class ProvenaltVerdict(BaseModel):
+    """Compact pass / warn / fail verdict (x402-gated tier, §7)."""
+
+    agent_id: int
+    verdict: str  # pass | warn | fail | insufficient
+    score: int | None
+    confidence: str
+
+
 class EligibilityResponse(BaseModel):
     """B20 eligibility + multiplier-aware balances. Large integers (uint64/uint256) are
     returned as strings to avoid JSON/JS precision loss."""

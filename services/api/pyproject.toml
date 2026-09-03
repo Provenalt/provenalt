@@ -10,6 +10,7 @@ dependencies = [
     "eth-abi>=5.1",
     "eth-utils>=4.1",
     "eth-hash[pycryptodome]>=0.7",
+    "x402[evm]>=2.8",
 ]
 
 [project.optional-dependencies]
@@ -50,5 +51,11 @@ mypy_path = "../../packages/shared"
 # __init__, which trips strict implicit-reexport checks. Treat them as untyped imports.
 [[tool.mypy.overrides]]
 module = ["eth_abi.*", "eth_utils.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
+# x402 SDK is accessed dynamically for our usage; treat as an untyped import.
+[[tool.mypy.overrides]]
+module = ["x402.*"]
 follow_imports = "skip"
 ignore_missing_imports = true

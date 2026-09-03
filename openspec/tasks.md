@@ -107,9 +107,22 @@ only when its tests pass. One task group per session (see repo `CLAUDE.md`).
       like Group 1.2/6.3)_
 
 ## Group 9 — Monetized distribution
-- [ ] 9.1 x402 integration on gated endpoints (USDC on Base, per-call pricing; start $0.01/call) — follow docs.cdp.coinbase.com x402 seller flow
-- [ ] 9.2 MCP server exposing `check_provenalt(agentId)` and `check_eligibility(wallet, token)`; installable via npx; README quickstart
-- [ ] 9.3 Usage metering + simple revenue dashboard (internal)
+- [x] 9.1 x402 integration on gated endpoints (USDC on Base, per-call pricing; start $0.01/call) — follow docs.cdp.coinbase.com x402 seller flow
+      _(researched → `docs/x402.md`; official `x402` SDK used for schemas/facilitator (not guessed);
+      custom `x402_gate.py` returns a spec-correct 402 (USDC on Base, $0.01) offline + verifies/settles
+      via the facilitator in prod; API-key bypass; built the two gated endpoints `/v1/agents/{id}/score`
+      (score + breakdown) and `/v1/provenalt/{id}` (verdict), and gated `/v1/eligibility`)_
+- [x] 9.2 MCP server exposing `check_provenalt(agentId)` and `check_eligibility(wallet, token)`; installable via npx; README quickstart
+      _(`services/mcp`: TS `@provenalt/mcp` (npx bin) over stdio; returns full structured objects; thin
+      client of the api with `X-API-Key` bypass; smoke-verified tools/list)_
+- [x] 9.3 Usage metering + simple revenue dashboard (internal)
+      _(`usage_events` table + migration `0008`; gate records per-endpoint/per-payer calls + revenue;
+      `scripts/usage_report.py` prints a per-endpoint revenue summary)_
+
+> Notes: the paid tier confirmed per §7 (score/provenalt/eligibility x402-gated; free tier unchanged;
+> partner `X-API-Key` bypasses x402 as it bypasses rate limits). x402 is **disabled by default** —
+> enable + set the receiving wallet + (Base mainnet) CDP facilitator via env. The verify/settle path
+> and MCP-against-live-API are exercised in production, not in offline tests.
 
 ## Group 10 — Launch
 - [ ] 10.1 Seed content: index fully caught up; top-agents page accurate

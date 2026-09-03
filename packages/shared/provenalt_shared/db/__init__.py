@@ -17,6 +17,7 @@ from provenalt_shared.db.models import (
     IndexerCursor,
     RawLog,
     ScoreRefreshQueue,
+    UsageEvent,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "IndexerCursor",
     "RawLog",
     "ScoreRefreshQueue",
+    "UsageEvent",
 ]

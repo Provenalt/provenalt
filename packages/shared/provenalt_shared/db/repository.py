@@ -37,6 +37,7 @@ from provenalt_shared.db.models import (
     IndexerCursor,
     RawLog,
     ScoreRefreshQueue,
+    UsageEvent,
 )
 
 __all__ = [
@@ -99,9 +100,13 @@ __all__ = [
     "api_key_hash",
     "create_api_key",
     "is_valid_api_key",
+    "api_key_label",
     "upsert_b20_token",
     "get_b20_token",
     "list_b20_tokens",
+    "record_usage_event",
+    "usage_summary",
+    "UsageSummaryRow",
 ]
 
 
@@ -850,6 +855,17 @@ def is_valid_api_key(session: Session, plaintext: str) -> bool:
     return bool(row)
 
 
+def api_key_label(session: Session, plaintext: str) -> str | None:
+    """Return an active key's label (for metering attribution), or None if invalid."""
+    if not plaintext:
+        return None
+    return session.execute(
+        select(ApiKey.label).where(
+            ApiKey.key_hash == api_key_hash(plaintext), ApiKey.active.is_(True)
+        )
+    ).scalar_one_or_none()
+
+
 # ── B20 token registry (proposal §7.2) ───────────────────────────────────────
 
 
@@ -880,3 +896,56 @@ def list_b20_tokens(session: Session, active_only: bool = True) -> list[B20Token
     if active_only:
         stmt = stmt.where(B20Token.active.is_(True))
     return list(session.execute(stmt).scalars())
+
+
+# ── usage metering (proposal §9.3) ───────────────────────────────────────────
+
+
+def record_usage_event(
+    session: Session,
+    *,
+    endpoint: str,
+    method: str,
+    payer: str,
+    payment_kind: str,
+    amount_atomic: int = 0,
+    asset: str | None = None,
+    tx_hash: str | None = None,
+) -> None:
+    session.add(
+        UsageEvent(
+            endpoint=endpoint,
+            method=method,
+            payer=payer,
+            payment_kind=payment_kind,
+            amount_atomic=amount_atomic,
+            asset=asset,
+            tx_hash=tx_hash,
+        )
+    )
+
+
+@dataclass(frozen=True)
+class UsageSummaryRow:
+    endpoint: str
+    payment_kind: str
+    calls: int
+    revenue_atomic: int
+
+
+def usage_summary(session: Session) -> list[UsageSummaryRow]:
+    """Per-(endpoint, payment_kind) call counts and revenue (atomic units)."""
+    rows = session.execute(
+        select(
+            UsageEvent.endpoint,
+            UsageEvent.payment_kind,
+            func.count(),
+            func.coalesce(func.sum(UsageEvent.amount_atomic), 0),
+        )
+        .group_by(UsageEvent.endpoint, UsageEvent.payment_kind)
+        .order_by(UsageEvent.endpoint, UsageEvent.payment_kind)
+    ).all()
+    return [
+        UsageSummaryRow(endpoint=e, payment_kind=k, calls=int(c), revenue_atomic=int(rev))
+        for e, k, c, rev in rows
+    ]

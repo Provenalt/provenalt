@@ -263,6 +263,31 @@ class ScoreRefreshQueue(Base):
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class UsageEvent(Base):
+    """Per-call usage metering for gated endpoints (proposal §9.3).
+
+    ``payment_kind``: ``paid`` (x402), ``api_key`` (partner bypass), or ``unpaid_open``
+    (x402 not configured). ``amount_atomic`` is revenue in the asset's atomic units
+    (USDC, 6 decimals), 0 for non-paid calls.
+    """
+
+    __tablename__ = "usage_events"
+    __table_args__ = (
+        Index("ix_usage_events_endpoint", "endpoint"),
+        Index("ix_usage_events_payer", "payer"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    endpoint: Mapped[str] = mapped_column(String(64), nullable=False)
+    method: Mapped[str] = mapped_column(String(8), nullable=False)
+    payer: Mapped[str] = mapped_column(String(128), nullable=False)
+    payment_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    amount_atomic: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    asset: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class B20Token(Base):
     """Registry of known B20 tokenized-stock contracts (proposal §7.2), extensible as more
     stocks land. Addresses are stored lowercased."""

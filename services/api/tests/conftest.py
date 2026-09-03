@@ -43,5 +43,8 @@ def client(factory: sessionmaker[Session]) -> Iterator[TestClient]:
             yield s
 
     app.dependency_overrides[get_session] = _override
+    # The x402 gate opens its own sessions (for API-key checks + metering); point it at the
+    # test database too.
+    app.state.db_factory = factory
     with TestClient(app) as c:
         yield c

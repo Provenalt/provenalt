@@ -49,7 +49,12 @@ Create one Railway **project** for Provenalt. Inside it, provision:
   - x402 config arrives in Group 9.
 - **Partner API keys:** created out-of-band and stored **hashed** in the `api_keys` table
   (`repository.create_api_key`); the plaintext is shown once and never persisted. Partners
-  send it via the `X-API-Key` header to bypass the free-tier rate limit.
+  send it via the `X-API-Key` header to bypass the free-tier rate limit **and x402 payment**.
+- **x402 (paid tier):** the score / provenalt / eligibility endpoints are payment-gated
+  (proposal §7, docs/x402.md). Set `PROVENALT_X402_ENABLED=true`, `PROVENALT_X402_PAY_TO`
+  (receiving wallet — a secret, set only in the dashboard), and for **Base mainnet**
+  `PROVENALT_X402_FACILITATOR_URL` to the Coinbase CDP facilitator (with CDP credentials).
+  Revenue/usage is metered in `usage_events`; see `scripts/usage_report.py`.
 - **Docs:** OpenAPI at `/openapi.json`, Swagger UI at `/docs`; liveness at `/healthz`.
 - **Smoke test** after deploy (read-only):
   `DATABASE_URL=... pytest -m integration` from `services/api` (hits `/healthz`, `/v1/stats`,

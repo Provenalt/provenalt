@@ -50,6 +50,20 @@ def test_api_rate_limit_returns_429(client: TestClient) -> None:
     assert "rate limit" in r.json()["detail"].lower()
 
 
+def test_paid_tier_is_rate_limited_when_x402_disabled(session: Session, client: TestClient) -> None:
+    """Payment gating complements rate limiting; it does not replace it. Even with x402
+    disabled (so the gate lets the call through), the per-IP limit still applies to the
+    paid-tier routes and a burst returns 429."""
+    seed.add_agent(session, 1, "0x" + "11" * 20)
+    seed.add_score(session, 1, score=72, confidence="high")
+    session.commit()
+
+    client.app.state.limiter = SlidingWindowLimiter(max_requests=2, window_seconds=60)
+    assert client.get("/v1/agents/1/score").status_code == 200
+    assert client.get("/v1/agents/1/score").status_code == 200
+    assert client.get("/v1/agents/1/score").status_code == 429  # burst over the limit
+
+
 def test_api_key_bypasses_rate_limit(session: Session, client: TestClient) -> None:
     repo.create_api_key(session, "partner-secret", label="partner")
     session.commit()

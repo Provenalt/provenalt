@@ -2,8 +2,8 @@
 
 ``GET /v1/eligibility?wallet=&token=`` — for a known B20 tokenized stock, reports whether a
 wallet may hold/transfer it (native PolicyRegistry ``isAuthorized``) plus multiplier-aware
-raw + adjusted balances. Per §7 this is an x402-gated tier; x402 gating arrives in Group 9,
-so for now it is per-IP rate limited like the free tier.
+raw + adjusted balances. Per §7 this is a paid tier: the x402 gate (payment) and the per-IP
+rate limit both apply; partner API keys bypass both.
 """
 
 from __future__ import annotations

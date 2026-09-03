@@ -10,7 +10,7 @@ dependencies = [
     "eth-abi>=5.1",
     "eth-utils>=4.1",
     "eth-hash[pycryptodome]>=0.7",
-    "x402[evm]>=2.8",
+    "x402[evm]>=2.21,<3",
 ]
 
 [project.optional-dependencies]

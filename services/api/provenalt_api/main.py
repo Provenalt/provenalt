@@ -21,11 +21,18 @@ from provenalt_shared.settings import get_settings
 
 from provenalt_api.ratelimit import SlidingWindowLimiter, rate_limit
 from provenalt_api.routers import agents, eligibility, score, stats
-from provenalt_api.x402_gate import config_from_settings, x402_gate
+from provenalt_api.x402_gate import config_from_settings, validate_x402_settings, x402_gate
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    # Startup guard: refuse to boot on a misconfigured mainnet facilitator (fail loudly here
+    # rather than on every paid request).
+    validate_x402_settings(
+        enabled=settings.x402_enabled,
+        network=settings.x402_network,
+        facilitator_url=settings.x402_facilitator_url,
+    )
     app = FastAPI(
         title="Provenalt API",
         version="0.1.0",
@@ -54,9 +61,10 @@ def create_app() -> FastAPI:
     # Free tier — per-IP rate limited.
     app.include_router(agents.router, dependencies=[Depends(rate_limit)])
     app.include_router(stats.router, dependencies=[Depends(rate_limit)])
-    # Paid tier — governed by the x402 gate (no per-IP limit).
-    app.include_router(score.router)
-    app.include_router(eligibility.router)
+    # Paid tier — the x402 gate (payment) and the per-IP rate limit both apply: payment
+    # gating complements rate limiting, it does not replace it. Partner API keys bypass both.
+    app.include_router(score.router, dependencies=[Depends(rate_limit)])
+    app.include_router(eligibility.router, dependencies=[Depends(rate_limit)])
     return app
 
 

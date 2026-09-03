@@ -63,6 +63,37 @@ def config_from_settings(s: Settings) -> X402Config:
     )
 
 
+# Networks that settle real value. The public x402.org facilitator only supports testnets,
+# so pairing a mainnet network with it would produce failed settlements in production.
+_MAINNET_NETWORKS = frozenset({"eip155:8453", "eip155:1"})  # Base mainnet, Ethereum mainnet
+_PUBLIC_X402_FACILITATOR_HOSTS = frozenset({"x402.org", "www.x402.org"})
+
+
+def is_public_x402_facilitator(url: str) -> bool:
+    """True if ``url`` points at the public x402.org facilitator (testnets only)."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    return host in _PUBLIC_X402_FACILITATOR_HOSTS
+
+
+def validate_x402_settings(*, enabled: bool, network: str, facilitator_url: str) -> None:
+    """Startup guard: refuse to start on a misconfigured mainnet facilitator.
+
+    If x402 is enabled on a mainnet network but pointed at the public x402.org facilitator
+    (which only supports testnets), settlement would fail on every paid call. Fail loudly at
+    startup instead of at request time.
+    """
+    if enabled and network in _MAINNET_NETWORKS and is_public_x402_facilitator(facilitator_url):
+        raise RuntimeError(
+            f"x402 is enabled on a mainnet network ({network}) but PROVENALT_X402_FACILITATOR_URL "
+            f"points at the public x402.org facilitator, which only supports testnets. Base "
+            f"mainnet settlement requires the Coinbase CDP facilitator (CDP API credentials). "
+            f"Set PROVENALT_X402_FACILITATOR_URL to your CDP facilitator URL, or use a testnet "
+            f"(eip155:84532) for local testing. Refusing to start to avoid failed settlements."
+        )
+
+
 def _price_asset(cfg: X402Config) -> Any:
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
 
@@ -158,7 +189,14 @@ async def x402_gate(request: Request, call_next: CallNext) -> Response:
 async def _enforce_paid(
     request: Request, call_next: CallNext, cfg: X402Config, label: str
 ) -> Response:
-    """Production path: verify → fulfill → settle via the facilitator. Not exercised offline."""
+    """Verify → fulfill → settle via the facilitator.
+
+    Settlement ordering (see ``docs/x402.md``): the payment is verified off-chain first, then
+    the handler runs, then — only if the handler succeeded — settlement is attempted **before
+    the response is served** to the client. If settlement does not succeed, the paid result is
+    withheld (402): a client is never served paid data without a successful on-chain
+    settlement, and a failed handler (e.g. 404) is never settled/charged.
+    """
     try:
         from x402.schemas import PaymentPayload
 
@@ -174,23 +212,30 @@ async def _enforce_paid(
             )
 
         response = await call_next(request)
+        # Don't settle or charge for a request the handler rejected (404, 429, 5xx, …).
+        if response.status_code >= 400:
+            return response
+
         settle = await server.settle_payment(payload, requirements)
+        if not getattr(settle, "success", False):
+            return JSONResponse(
+                payment_required_body(cfg, "payment settlement failed"), status_code=402
+            )
 
         asset = _price_asset(cfg)
+        payer = getattr(settle, "payer", None) or getattr(payload, "payer", None) or "unknown"
         _meter(
             request,
             label,
-            payer=str(getattr(payload, "payer", "unknown")),
+            payer=str(payer),
             kind="paid",
             amount=int(asset.amount),
             asset=asset.asset,
             tx_hash=getattr(settle, "transaction", None),
         )
-        tx = getattr(settle, "transaction", None)
-        if tx:
-            response.headers["X-PAYMENT-RESPONSE"] = base64.b64encode(
-                settle.model_dump_json().encode()
-            ).decode()
+        response.headers["X-PAYMENT-RESPONSE"] = base64.b64encode(
+            settle.model_dump_json().encode()
+        ).decode()
         return response
     except Exception:  # noqa: BLE001 — fail safe: never leak internals, ask for payment again
         return JSONResponse(

@@ -18,9 +18,12 @@ def test_defaults_are_sane_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.log_level == "INFO"
     assert settings.log_format == "console"
     assert settings.finality_depth == 64
-    assert settings.getlogs_initial_chunk == 10_000
+    assert settings.getlogs_initial_chunk == 2_000
     assert settings.getlogs_min_chunk == 100
     assert settings.getlogs_max_chunk == 50_000
+    assert settings.rpc_backoff_initial_seconds == 2.0
+    assert settings.rpc_backoff_max_seconds == 60.0
+    assert settings.rpc_max_retries == 8
     assert settings.database_url is None
 
 
@@ -54,6 +57,18 @@ def test_env_prefix_and_database_url_alias(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.database_url == "postgresql://u:p@localhost:5432/provenalt"
 
 
+def test_rpc_backoff_overrides_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROVENALT_RPC_BACKOFF_INITIAL_SECONDS", "1.5")
+    monkeypatch.setenv("PROVENALT_RPC_BACKOFF_MAX_SECONDS", "45")
+    monkeypatch.setenv("PROVENALT_RPC_MAX_RETRIES", "12")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.rpc_backoff_initial_seconds == 1.5
+    assert settings.rpc_backoff_max_seconds == 45.0
+    assert settings.rpc_max_retries == 12
+
+
 def test_at_least_one_rpc_url_required_when_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -72,4 +87,7 @@ def _provenalt_env_vars() -> tuple[str, ...]:
         "PROVENALT_GETLOGS_INITIAL_CHUNK",
         "PROVENALT_GETLOGS_MIN_CHUNK",
         "PROVENALT_GETLOGS_MAX_CHUNK",
+        "PROVENALT_RPC_BACKOFF_INITIAL_SECONDS",
+        "PROVENALT_RPC_BACKOFF_MAX_SECONDS",
+        "PROVENALT_RPC_MAX_RETRIES",
     )

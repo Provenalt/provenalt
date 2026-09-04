@@ -42,9 +42,21 @@ class Settings(BaseSettings):
         default_factory=lambda: ["https://mainnet.base.org", "https://base.publicnode.com"]
     )
     finality_depth: int = 64
-    getlogs_initial_chunk: int = 10_000
+    # Conservative starting window for a cold backfill: many free-tier Base RPC providers
+    # meter eth_getLogs heavily and rate-limit (429) large scans, so start small (2,000
+    # blocks) and let AdaptiveChunkSizer grow toward getlogs_max_chunk on success. Starting
+    # high (e.g. 10k) risks exhausting a free provider's quota on the very first requests.
+    getlogs_initial_chunk: int = 2_000
     getlogs_min_chunk: int = 100
     getlogs_max_chunk: int = 50_000
+
+    # RPC rate-limit (HTTP 429) backoff. A long-running indexer treats 429 as transient:
+    # once every provider has 429'd the same request the client sleeps with exponential
+    # backoff (initial seconds, doubling, capped at max, jittered) and retries up to
+    # rpc_max_retries times before finally raising — instead of crashing the worker.
+    rpc_backoff_initial_seconds: float = 2.0
+    rpc_backoff_max_seconds: float = 60.0
+    rpc_max_retries: int = 8
 
     # Database — read from DATABASE_URL (no prefix), optional until Group 2.
     database_url: str | None = Field(

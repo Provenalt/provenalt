@@ -109,6 +109,9 @@ def main() -> None:  # pragma: no cover - long-running process wiring
         initial_chunk=settings.getlogs_initial_chunk,
         min_chunk=settings.getlogs_min_chunk,
         max_chunk=settings.getlogs_max_chunk,
+        backoff_initial_seconds=settings.rpc_backoff_initial_seconds,
+        backoff_max_seconds=settings.rpc_backoff_max_seconds,
+        max_retries=settings.rpc_max_retries,
     )
     card_fetcher = CardFetcher()
 

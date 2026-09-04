@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from provenalt_shared.chain import ChainClient, RateLimitError, RpcError, TransportError
@@ -64,13 +66,51 @@ def test_call_raises_rpc_error_without_rotating() -> None:
         _client(transport).call("nonexistent_method", [])
 
 
-def test_call_raises_when_all_providers_rate_limited() -> None:
+def test_call_backs_off_then_succeeds_when_rate_limit_clears() -> None:
+    class LimitedTwiceThenOk:
+        def __init__(self) -> None:
+            self.remaining = 2  # both providers 429 once → one full sweep, then recover
+
+        def __call__(self, url: str, payload: dict) -> dict:
+            if self.remaining > 0:
+                self.remaining -= 1
+                raise RateLimitError("429")
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": "0x2a"}
+
+    sleeps: list[float] = []
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=LimitedTwiceThenOk(),
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        max_retries=5,
+        sleep=sleeps.append,
+        rng=random.Random(0),
+    )
+    assert client.call("eth_blockNumber", []) == "0x2a"
+    assert len(sleeps) == 1  # one full 429 sweep → one backoff sleep, then success
+
+
+def test_call_raises_after_max_retries_when_all_providers_rate_limited() -> None:
     class AlwaysLimited:
         def __call__(self, url: str, payload: dict) -> dict:
             raise RateLimitError("429")
 
+    sleeps: list[float] = []
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=AlwaysLimited(),
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        max_retries=2,
+        sleep=sleeps.append,
+        rng=random.Random(0),
+    )
     with pytest.raises(RateLimitError):
-        _client(AlwaysLimited()).call("eth_blockNumber", [])
+        client.call("eth_blockNumber", [])
+    assert len(sleeps) == 2  # backed off twice before finally raising
 
 
 def test_get_block_number_parses_hex() -> None:

@@ -6,6 +6,8 @@ test_chain_integration.py and are marked `integration` (excluded from default ru
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from provenalt_shared.chain import (
@@ -14,6 +16,17 @@ from provenalt_shared.chain import (
     RateLimitError,
     RpcError,
 )
+
+
+class RecordingSleep:
+    """Fake sleep: records the requested delays instead of blocking, so tests stay fast."""
+
+    def __init__(self) -> None:
+        self.delays: list[float] = []
+
+    def __call__(self, seconds: float) -> None:
+        self.delays.append(seconds)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AdaptiveChunkSizer
@@ -117,6 +130,30 @@ class RateLimitedThenOk:
         }
 
 
+class RateLimitedNTimes:
+    """429s the first ``fail_times`` calls across ALL providers, then always succeeds.
+
+    Simulates systemic rate limiting (every provider 429ing) that eventually clears — used
+    to prove the client backs off and then recovers rather than crashing.
+    """
+
+    def __init__(self, fail_times: int) -> None:
+        self.remaining_fails = fail_times
+        self.calls: list[tuple[str, int, int]] = []
+
+    def __call__(self, url: str, payload: dict) -> dict:
+        fb, tb = _range_of(payload)
+        self.calls.append((url, fb, tb))
+        if self.remaining_fails > 0:
+            self.remaining_fails -= 1
+            raise RateLimitError("HTTP 429 Too Many Requests")
+        return {
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": [{"data": "0x", "_range": [fb, tb]}],
+        }
+
+
 def _assert_contiguous_coverage(logs: list[dict], start: int, end: int) -> None:
     ranges = sorted(tuple(log["_range"]) for log in logs)
     assert ranges[0][0] == start
@@ -196,21 +233,93 @@ def test_getlogs_recovers_and_grows_after_transient_rate_limit() -> None:
     assert client.chunk_size == 8000
 
 
-def test_getlogs_raises_when_all_providers_rate_limited() -> None:
+def test_getlogs_backs_off_then_recovers_when_all_providers_rate_limited() -> None:
+    # Every provider 429s the first few requests, then the pressure clears. The backfill
+    # must sleep (back off) rather than crash, and complete once the transport recovers.
+    transport = RateLimitedNTimes(fail_times=3)
+    sleeps = RecordingSleep()
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=transport,
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        backoff_initial_seconds=2.0,
+        backoff_max_seconds=60.0,
+        max_retries=5,
+        sleep=sleeps,
+        rng=random.Random(0),
+    )
+
+    logs = client.get_logs(address="0xabc", topics=[], from_block=0, to_block=500)
+
+    _assert_contiguous_coverage(logs, 0, 500)
+    # A full provider sweep of 429s triggered at least one exponential-backoff sleep...
+    assert len(sleeps.delays) >= 1
+    # ...whose first wait is ~initial (2s) with equal jitter → within [1, 2] seconds.
+    assert 1.0 <= sleeps.delays[0] <= 2.0
+    # ...and each 429 shrank the chunk below the initial size.
+    spans = [tb - fb + 1 for _, fb, tb in transport.calls]
+    assert min(spans) < 1000
+
+
+def test_getlogs_shrinks_chunk_on_rate_limit() -> None:
+    transport = RateLimitedNTimes(fail_times=1)  # a single 429, then success
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=transport,
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        sleep=RecordingSleep(),
+        rng=random.Random(0),
+    )
+    client.get_logs(address="0xabc", topics=[], from_block=0, to_block=2000)
+    # The first request used the initial chunk; the 429 shrank the next one.
+    spans = [tb - fb + 1 for _, fb, tb in transport.calls]
+    assert spans[0] == 1000
+    assert spans[1] < 1000
+
+
+def test_getlogs_raises_after_max_retries_when_rate_limit_never_clears() -> None:
     class AlwaysRateLimited:
         def __call__(self, url: str, payload: dict) -> dict:
             raise RateLimitError("HTTP 429")
 
+    sleeps = RecordingSleep()
     client = ChainClient(
         rpc_urls=["https://a.example", "https://b.example"],
         transport=AlwaysRateLimited(),
         initial_chunk=1000,
         min_chunk=100,
         max_chunk=8000,
-        max_attempts_per_range=6,
+        max_retries=3,
+        sleep=sleeps,
+        rng=random.Random(0),
     )
     with pytest.raises(RateLimitError):
         client.get_logs(address="0xabc", topics=[], from_block=0, to_block=999)
+    # It backed off max_retries times before finally giving up — never on the first 429.
+    assert len(sleeps.delays) == 3
+
+
+def test_backoff_delay_doubles_with_jitter_and_caps_at_max() -> None:
+    client = ChainClient(
+        rpc_urls=["https://a.example"],
+        transport=lambda url, payload: {},  # unused: we call _backoff_delay directly
+        initial_chunk=100,
+        min_chunk=100,
+        max_chunk=100,
+        backoff_initial_seconds=2.0,
+        backoff_max_seconds=60.0,
+        rng=random.Random(1),
+    )
+    # Round 0 base = 2s → equal jitter keeps it in [1, 2].
+    assert 1.0 <= client._backoff_delay(0) <= 2.0
+    # Round 2 base = 8s → [4, 8].
+    assert 4.0 <= client._backoff_delay(2) <= 8.0
+    # Round 10 base = 2048s but capped at 60 → [30, 60]; never exceeds the cap.
+    assert 30.0 <= client._backoff_delay(10) <= 60.0
 
 
 def test_getlogs_propagates_non_range_rpc_error() -> None:

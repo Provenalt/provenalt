@@ -12,7 +12,9 @@ export function DetailRow({ label, children }: { label: string; children: ReactN
 export function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="panel">
-      <h2 className="border-b border-border px-4 py-3 text-sm font-600 text-fg">{title}</h2>
+      <h2 className="border-b border-border px-4 py-2.5 font-mono text-[0.72rem] font-medium uppercase tracking-[0.12em] text-fg-muted">
+        {title}
+      </h2>
       <div className="px-4 py-3">{children}</div>
     </section>
   );

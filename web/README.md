@@ -18,10 +18,15 @@ public API at `NEXT_PUBLIC_API_BASE_URL`.
 
 ### Design
 
-Dark, technical, high-contrast (design direction via the ui-ux-pro-max skill): slate
-neutrals with a restrained trust-blue accent and a traffic-light verdict system for the
-score; **Fira Code** (mono) for the wordmark, score, and all data, **Fira Sans** for body;
-tabular figures throughout. No chart library — the growth chart is hand-rolled SVG.
+**Editorial light** — "the Provenalt ledger" (design direction via the ui-ux-pro-max skill).
+A warm cream paper with warm-ink body text and a single deep **oxblood** accent used sparingly
+(links, masthead rule, active states) — deliberately distinct from the dark slate-blue
+dashboards common to the category. Verdicts keep their semantic roles in a warmer, editorial
+palette (forest green / mustard-ochre / brick red rather than neon). Typography-driven:
+**Fraunces** (variable serif) for display/mastheads, **Newsreader** (variable serif) for body
+and prose, and **IBM Plex Mono** reserved strictly for data — agent IDs, addresses, hashes,
+block numbers, scores, and letterspaced section labels. Tabular figures throughout; hairline
+rules instead of drop shadows. No chart library — the growth chart is hand-rolled SVG.
 
 ## Develop
 

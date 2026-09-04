@@ -69,8 +69,8 @@ export default async function AgentPage({
             <div className="flex flex-col gap-6 p-5 sm:flex-row sm:items-center">
               <ScoreDial score={agent.score?.score ?? null} confidence={agent.score?.confidence ?? null} />
               <div className="flex-1">
-                <h2 className="text-sm font-600 text-fg">Provenalt Score</h2>
-                <p className="mt-1 text-sm text-fg-muted">
+                <h2 className="display text-xl font-500 tracking-tight text-fg">Provenalt Score</h2>
+                <p className="mt-1.5 text-[0.95rem] leading-7 text-fg-muted">
                   A transparent 0–100 trust score. Weights are published and versioned.
                 </p>
                 <dl className="mt-3">

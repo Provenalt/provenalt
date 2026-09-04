@@ -1,34 +1,36 @@
-@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  /* Dark, technical, trustworthy — deliberately not a neon crypto template.
+  /* Editorial light — "the Provenalt ledger". Warm cream paper, ink text, a single
+     oxblood accent used sparingly. Deliberately NOT a dark slate dashboard.
      Stored as "R G B" channels so Tailwind opacity modifiers (bg-accent/10) work;
      use rgb(var(--x)) for full-opacity inline styles (SVG strokes etc.). */
-  --bg: 10 12 16;
-  --panel: 18 21 27;
-  --panel-2: 23 27 35;
-  --border: 35 42 52;
-  --border-strong: 46 54 68;
-  --fg: 231 235 242;
-  --fg-muted: 154 163 180;
-  --fg-faint: 107 115 130;
-  --accent: 76 134 240;
-  --accent-fg: 220 232 255;
+  --bg: 244 240 230; /* warm cream paper (not pure white) */
+  --panel: 237 231 217; /* tinted editorial box */
+  --panel-2: 229 221 203; /* deeper tint / hover */
+  --border: 214 205 185; /* warm hairline rule */
+  --border-strong: 193 181 156;
+  --fg: 31 27 22; /* warm near-black ink */
+  --fg-muted: 90 82 70; /* warm brown-gray */
+  --fg-faint: 121 112 96;
+  --accent: 110 31 46; /* deep oxblood — links, brand, active state */
+  --accent-fg: 84 18 30; /* darker oxblood — hover / emphasis */
 
-  /* Trust-verdict bands for the score. */
-  --pass: 70 185 138;
-  --warn: 224 166 60;
-  --fail: 229 86 75;
-  --none: 122 131 149;
+  /* Trust-verdict bands — warmer, editorial (forest / ochre / brick), not neon. */
+  --pass: 47 107 60; /* forest green */
+  --warn: 143 100 16; /* mustard / ochre */
+  --fail: 168 67 46; /* brick / terracotta */
+  --none: 138 129 113; /* warm gray */
 
-  --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "Fira Code", ui-monospace, "SFMono-Regular", "Menlo", monospace;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", "Menlo", monospace;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 @layer base {
@@ -40,17 +42,13 @@
   }
   body {
     @apply bg-bg text-fg;
-    font-family: var(--font-sans);
-    /* Tabular figures everywhere — data must not jitter. */
+    font-family: var(--font-serif);
+    /* Optical sizing on the variable serifs; tabular figures so data never jitters. */
+    font-optical-sizing: auto;
     font-variant-numeric: tabular-nums;
-    background-image: radial-gradient(
-      60rem 40rem at 50% -10rem,
-      rgba(76, 134, 240, 0.06),
-      transparent 70%
-    );
   }
   ::selection {
-    background: rgba(76, 134, 240, 0.28);
+    background: rgba(110, 31, 46, 0.18);
   }
   a {
     @apply transition-colors duration-150;
@@ -63,11 +61,19 @@
 }
 
 @layer components {
+  /* Letterspaced mono kicker — the editorial "section label" above headings. */
   .eyebrow {
     @apply text-eyebrow font-mono font-medium uppercase text-fg-faint;
   }
+  /* Editorial display type — Fraunces, for headlines and mastheads. */
+  .display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+  }
+  /* A tinted, hairline-ruled editorial box. Crisp corners, no drop shadows. */
   .panel {
-    @apply rounded-lg border border-border bg-panel;
+    @apply rounded-sm border border-border bg-panel;
   }
   .hairline {
     @apply border-border;
@@ -77,39 +83,42 @@
   }
 }
 
-/* Markdown rendering (methodology). Controlled, on-brand typography. */
+/* Markdown rendering (methodology). Editorial serif body, Fraunces headings. */
 .prose-md {
   @apply max-w-prose text-fg-muted;
 }
 .prose-md h1 {
-  @apply mb-4 mt-0 text-2xl font-600 tracking-tight text-fg;
+  @apply display mb-4 mt-0 text-3xl font-500 tracking-tight text-fg;
 }
 .prose-md h2 {
-  @apply mb-3 mt-10 border-b border-border pb-2 text-lg font-600 text-fg;
+  @apply display mb-3 mt-10 border-b border-border pb-2 text-xl font-500 text-fg;
 }
 .prose-md h3 {
-  @apply mb-2 mt-6 text-base font-600 text-fg;
+  @apply display mb-2 mt-6 text-lg font-600 text-fg;
 }
 .prose-md p {
-  @apply my-3 leading-7;
+  @apply my-3 text-[1.02rem] leading-8;
 }
 .prose-md a {
-  @apply text-accent hover:text-accent-fg;
+  @apply text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent;
 }
 .prose-md strong {
   @apply font-600 text-fg;
 }
+.prose-md em {
+  @apply italic;
+}
 .prose-md code {
-  @apply mono rounded bg-panel-2 px-1.5 py-0.5 text-[0.85em] text-fg;
+  @apply mono rounded-sm bg-panel-2 px-1.5 py-0.5 text-[0.82em] text-fg;
 }
 .prose-md ul {
-  @apply my-3 list-disc space-y-1.5 pl-5;
+  @apply my-3 list-disc space-y-1.5 pl-5 marker:text-fg-faint;
 }
 .prose-md ol {
-  @apply my-3 list-decimal space-y-1.5 pl-5;
+  @apply my-3 list-decimal space-y-1.5 pl-5 marker:text-fg-faint;
 }
 .prose-md blockquote {
-  @apply my-4 border-l-2 border-border-strong pl-4 text-fg-faint;
+  @apply my-4 border-l-2 border-accent/50 pl-4 italic text-fg-muted;
 }
 .prose-md hr {
   @apply my-8 border-border;
@@ -118,7 +127,7 @@
   @apply my-4 w-full border-collapse text-sm;
 }
 .prose-md th {
-  @apply border-b border-border px-3 py-2 text-left font-600 text-fg;
+  @apply border-b border-border-strong px-3 py-2 text-left font-600 text-fg;
 }
 .prose-md td {
   @apply border-b border-border/60 px-3 py-2 align-top;

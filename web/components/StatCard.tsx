@@ -10,8 +10,8 @@ export function StatCard({
   return (
     <div className="panel px-4 py-4">
       <div className="eyebrow">{label}</div>
-      <div className="mono mt-2 text-2xl font-600 text-fg">{value}</div>
-      {hint ? <div className="mt-1 text-xs text-fg-faint">{hint}</div> : null}
+      <div className="mono mt-2 text-[1.75rem] font-500 leading-none text-fg">{value}</div>
+      {hint ? <div className="mt-1.5 text-xs text-fg-faint">{hint}</div> : null}
     </div>
   );
 }

@@ -26,7 +26,7 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean }) {
 
   return (
     <form onSubmit={onSubmit} role="search" className="w-full">
-      <div className="flex items-center gap-2 rounded-lg border border-border-strong bg-panel px-3 py-2.5 focus-within:border-accent">
+      <div className="flex items-center gap-2 rounded-sm border border-border-strong bg-bg px-3 py-2.5 focus-within:border-accent">
         <Search className="h-4 w-4 shrink-0 text-fg-faint" aria-hidden />
         <input
           // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -39,7 +39,7 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean }) {
         />
         <button
           type="submit"
-          className="rounded-md bg-accent px-3 py-1 text-sm font-500 text-white hover:brightness-110"
+          className="rounded-sm bg-accent px-3.5 py-1 font-mono text-xs uppercase tracking-wider text-bg hover:bg-accent-fg"
         >
           Search
         </button>

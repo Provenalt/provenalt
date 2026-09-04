@@ -35,9 +35,9 @@ export default async function AgentsPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-600 tracking-tight text-fg">Agents</h1>
-        <p className="mt-1 text-sm text-fg-muted">
+      <div className="border-b border-border pb-3">
+        <h1 className="display text-3xl font-500 tracking-tight text-fg">Agents</h1>
+        <p className="mt-1 font-mono text-xs uppercase tracking-wider text-fg-muted">
           {formatInt(total)} indexed · showing {shownFrom}–{shownTo}
         </p>
       </div>

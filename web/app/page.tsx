@@ -21,17 +21,17 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-14">
-      <section className="pt-6">
+      <section className="border-b border-border pb-12 pt-6">
         <p className="eyebrow">Trust layer · ERC-8004 · Base</p>
-        <h1 className="mt-3 max-w-3xl text-balance text-4xl font-600 leading-[1.1] tracking-tight text-fg sm:text-5xl">
-          Can this agent be trusted?
+        <h1 className="display mt-4 max-w-4xl text-balance text-5xl font-500 leading-[1.05] tracking-tight text-fg sm:text-6xl">
+          Can this agent be <span className="font-serif italic">trusted</span>?
         </h1>
-        <p className="mt-4 max-w-prose text-fg-muted">
+        <p className="mt-6 max-w-prose text-lg leading-8 text-fg-muted">
           Provenalt reads the ERC-8004 Identity and Reputation registries on Base, validates
           each agent&rsquo;s off-chain card, and computes a transparent Provenalt Score — so a
           number, a card, and a history stand behind every agent.
         </p>
-        <div className="mt-6 max-w-xl">
+        <div className="mt-7 max-w-xl">
           <SearchBar />
         </div>
       </section>
@@ -51,9 +51,12 @@ export default async function HomePage() {
       </section>
 
       <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-600 text-fg">Recent agents</h2>
-          <Link href="/agents" className="text-sm text-accent hover:text-accent-fg">
+        <div className="mb-4 flex items-baseline justify-between border-b border-border pb-2">
+          <h2 className="display text-2xl font-500 tracking-tight text-fg">Recent agents</h2>
+          <Link
+            href="/agents"
+            className="font-mono text-xs uppercase tracking-wider text-accent hover:text-accent-fg"
+          >
             Browse all →
           </Link>
         </div>

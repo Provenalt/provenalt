@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
 
 const NAV = [
   { href: "/agents", label: "Agents" },
@@ -9,20 +8,20 @@ const NAV = [
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-bg/80 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5">
-        <Link href="/" className="group flex items-center gap-2" aria-label="Provenalt home">
-          <ShieldCheck className="h-5 w-5 text-accent" aria-hidden />
-          <span className="mono text-[0.95rem] font-600 tracking-tight text-fg">
-            provenalt
+    <header className="sticky top-0 z-40 border-t-2 border-accent bg-bg/90 backdrop-blur">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 border-b border-border px-5">
+        <Link href="/" className="group flex items-baseline gap-2.5" aria-label="Provenalt home">
+          <span className="display text-2xl font-600 tracking-tight text-fg">Provenalt</span>
+          <span className="hidden font-mono text-eyebrow uppercase text-fg-faint sm:inline">
+            The Agent Ledger
           </span>
         </Link>
-        <nav className="flex items-center gap-1 text-sm">
+        <nav className="flex items-center gap-5 font-mono text-[0.7rem] uppercase tracking-[0.12em]">
           {NAV.map((item) => (
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-md px-3 py-1.5 text-fg-muted hover:bg-panel hover:text-fg"
+              className="text-fg-muted underline-offset-4 hover:text-accent hover:underline"
             >
               {item.label}
             </Link>

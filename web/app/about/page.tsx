@@ -15,9 +15,9 @@ const FACTS = [
 export default function AboutPage() {
   return (
     <div className="space-y-10">
-      <header>
+      <header className="border-b border-border pb-6">
         <p className="eyebrow">About</p>
-        <h1 className="mt-3 text-3xl font-600 tracking-tight text-fg">
+        <h1 className="display mt-4 max-w-3xl text-balance text-4xl font-500 leading-[1.1] tracking-tight text-fg">
           A trust layer for the agentic economy
         </h1>
       </header>
@@ -48,7 +48,7 @@ export default function AboutPage() {
       </div>
 
       <section>
-        <h2 className="mb-3 text-sm font-600 text-fg">On-chain facts</h2>
+        <h2 className="eyebrow mb-3">On-chain facts</h2>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {FACTS.map((f) => (
             <div key={f.label} className="panel px-4 py-3">

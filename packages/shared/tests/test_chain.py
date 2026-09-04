@@ -6,13 +6,16 @@ test_chain_integration.py and are marked `integration` (excluded from default ru
 
 from __future__ import annotations
 
+import json
 import random
 
+import httpx
 import pytest
 
 from provenalt_shared.chain import (
     AdaptiveChunkSizer,
     ChainClient,
+    HttpxTransport,
     RateLimitError,
     RpcError,
 )
@@ -202,6 +205,54 @@ def test_getlogs_never_exceeds_cap_on_successful_requests() -> None:
     )
     logs = client.get_logs(address="0xabc", topics=[], from_block=0, to_block=3000)
     _assert_contiguous_coverage(logs, 0, 3000)
+
+
+def test_getlogs_shrinks_and_completes_when_range_cap_arrives_as_http_400() -> None:
+    """The production bug: Alchemy rejects an oversized eth_getLogs range with an HTTP 400
+    whose body is a JSON-RPC error. End-to-end through the real HttpxTransport, that must
+    shrink the chunk on the SAME provider (not rotate away) and cover the whole range."""
+    cap = 500
+    seen_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        payload = json.loads(request.content)
+        params = payload["params"][0]
+        fb, tb = int(params["fromBlock"], 16), int(params["toBlock"], 16)
+        if tb - fb + 1 > cap:
+            return httpx.Response(
+                400,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": payload["id"],
+                    # Alchemy's actual phrasing for the range cap.
+                    "error": {
+                        "code": -32602,
+                        "message": "Log response size exceeded. You can make eth_getLogs "
+                        "requests with up to a 500 block range.",
+                    },
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": payload["id"], "result": [{"_range": [fb, tb]}]},
+        )
+
+    transport = HttpxTransport(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=transport,
+        initial_chunk=2000,
+        min_chunk=100,
+        max_chunk=5000,
+    )
+
+    logs = client.get_logs(address="0xabc", topics=[], from_block=0, to_block=3000)
+
+    _assert_contiguous_coverage(logs, 0, 3000)
+    assert client.chunk_size < 2000  # adapted downward instead of dying
+    # Crucially, the range cap shrank the chunk on ONE provider rather than rotating away.
+    assert len(set(seen_urls)) == 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -58,27 +58,47 @@ class BlockRangeCapError(RpcError):
     """A JSON-RPC error indicating the requested block range was too large."""
 
 
-# Substrings (lowercased) that identify a block-range-cap rejection across providers.
+# Substrings (lowercased) that unambiguously identify an eth_getLogs block-range /
+# response-size cap. Phrasings were taken from the errors these providers actually return
+# (verified against production responses and each provider's public docs):
+#
+#   Alchemy      "Log response size exceeded. You can make eth_getLogs requests with up to
+#                a 2K block range..." / "...up to a 500 block range..."
+#   Base RPC     "block range is too large" (Geth/Reth-family public node)
+#   Infura       "query returned more than 10000 results"
+#   QuickNode    "eth_getLogs is limited to a 10000 block range"
+#   Ankr         "block range is too wide" / "requested too many blocks"
 _BLOCK_RANGE_HINTS: tuple[str, ...] = (
-    "block range",
-    "block range is too large",
-    "range is too large",
-    "too many blocks",
-    "query returned more than",
-    "exceed maximum block range",
-    "limit exceeded",
-    "response size exceeded",
-    "logs matched by query exceeds",
+    "block range",  # Alchemy, Base RPC, Infura ("try with this block range [..]")
+    "range is too large",  # Base RPC / Geth-family
+    "range is too wide",  # Ankr
+    "too many blocks",  # Ankr ("requested too many blocks")
+    "query returned more than",  # Infura ("query returned more than 10000 results")
+    "response size exceeded",  # Alchemy ("Log response size exceeded")
+    "log response size",  # Alchemy (variant)
+    "logs matched by query exceeds",  # Geth-family
+    "exceed maximum block range",  # QuickNode / Geth
+    "limit exceeded",  # generic providers
 )
+# Generic "cap" verbs that only mean a range cap when paired with a range/log noun — this
+# keeps precision so an unrelated RpcError that merely says "exceeds" (e.g. "exceeds
+# balance") is NOT misread as a range cap and needlessly retried.
+_CAP_VERBS: tuple[str, ...] = ("limited to", "up to", "exceeds", "should be within")
+_CAP_NOUNS: tuple[str, ...] = ("block", "range", "logs", "results")
+
 # JSON-RPC error codes providers commonly use for range/limit rejections.
-_BLOCK_RANGE_CODES: frozenset[int] = frozenset({-32005, -32602, -32000})
+_BLOCK_RANGE_CODES: frozenset[int] = frozenset({-32005, -32602, -32000, -32600})
 
 
 def _is_block_range_error(code: int, message: str) -> bool:
     lowered = message.lower()
     if any(hint in lowered for hint in _BLOCK_RANGE_HINTS):
         return True
-    # Some providers only signal via a code plus a vaguer "range"/"limit" message.
+    # A generic cap verb ("limited to", "up to a N block range", "exceeds", …) paired with a
+    # range/log noun — covers Alchemy/QuickNode phrasings without over-matching.
+    if any(v in lowered for v in _CAP_VERBS) and any(n in lowered for n in _CAP_NOUNS):
+        return True
+    # Some providers only signal via a known code plus a vaguer "range"/"limit" message.
     if code in _BLOCK_RANGE_CODES and ("range" in lowered or "limit" in lowered):
         return True
     return False
@@ -160,15 +180,43 @@ class Transport(Protocol):
     def __call__(self, url: str, payload: dict[str, Any]) -> dict[str, Any]: ...
 
 
+def _extract_rpc_error(response: httpx.Response) -> tuple[int, str] | None:
+    """Return ``(code, message)`` if the body is a JSON-RPC error object, else ``None``.
+
+    Some providers reject a request with an HTTP 4xx whose body is nonetheless a JSON-RPC
+    error object rather than a 200-with-error — Alchemy does exactly this for an oversized
+    ``eth_getLogs`` range. A non-JSON body (HTML error page, empty) yields ``None`` so the
+    caller falls back to a generic :class:`TransportError`.
+    """
+    try:
+        body = response.json()
+    except ValueError:  # non-JSON body (json.JSONDecodeError subclasses ValueError)
+        return None
+    if not isinstance(body, dict):
+        return None
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return None
+    try:
+        code = int(error.get("code", 0))
+    except (TypeError, ValueError):
+        code = 0
+    return code, str(error.get("message", ""))
+
+
 class HttpxTransport:
     """Production transport: POSTs JSON-RPC over HTTP with httpx.
 
     Maps transport-level conditions to the client's error taxonomy so the
-    :class:`ChainClient` can react (rotate providers, shrink chunks):
+    :class:`ChainClient` can react (rotate providers, shrink chunks, back off):
 
     * HTTP 429 → :class:`RateLimitError`
-    * HTTP 5xx / connection failures → :class:`TransportError`
-    * other 4xx → :class:`TransportError` (surfaced, not silently rotated forever)
+    * HTTP 4xx whose body is a JSON-RPC error → :class:`BlockRangeCapError` (range/size cap)
+      or :class:`RpcError` (anything else). Providers such as Alchemy return an oversized
+      ``eth_getLogs`` rejection as an HTTP 400 with a JSON-RPC error body, not a 200; mapping
+      the whole 4xx bucket to ``TransportError`` made the client rotate providers forever
+      instead of shrinking the chunk, so the backfill never advanced.
+    * HTTP 5xx / non-JSON 4xx / connection failures → :class:`TransportError`
     """
 
     def __init__(self, timeout: float = 10.0, client: httpx.Client | None = None) -> None:
@@ -185,6 +233,14 @@ class HttpxTransport:
         if response.status_code >= 500:
             raise TransportError(f"HTTP {response.status_code} from {url}")
         if response.status_code >= 400:
+            # A 4xx can still carry a JSON-RPC error (Alchemy does this for range caps).
+            # Classify it so range caps shrink the chunk instead of rotating providers.
+            rpc_error = _extract_rpc_error(response)
+            if rpc_error is not None:
+                code, message = rpc_error
+                if _is_block_range_error(code, message):
+                    raise BlockRangeCapError(code, message)
+                raise RpcError(code, message)
             raise TransportError(f"HTTP {response.status_code} from {url}")
 
         result: dict[str, Any] = response.json()

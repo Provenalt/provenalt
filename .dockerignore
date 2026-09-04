@@ -1,0 +1,36 @@
+# Keep the Docker build context (the repo root) small and deterministic.
+# The Python service images never need the web app, JS deps, VCS data, or local caches.
+
+# Web app + JavaScript toolchain (not part of the Python service images)
+web/
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+dist/
+**/dist/
+
+# Local Python virtualenvs and bytecode
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# VCS
+.git/
+.gitignore
+
+# Python tool caches / build artifacts (rebuilt inside the image)
+.mypy_cache/
+**/.mypy_cache/
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+**/.ruff_cache/
+*.egg-info/
+**/*.egg-info/
+
+# Never bake local env files / secrets into an image
+.env
+**/.env

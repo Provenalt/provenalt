@@ -21,9 +21,19 @@ Create one Railway **project** for Provenalt. Inside it, provision:
 - No schema is created yet — migrations arrive with Group 2.
 
 ### 1.2 Service: `indexer` (long-running worker)
-- **Root directory:** `services/indexer`
+
+Railway's Nixpacks auto-builder **cannot** build this service: it depends on `packages/shared`,
+which lives outside `services/indexer/`. Deploy it from the committed **Dockerfile** instead,
+with the **repo root** as the build context (see [`services/indexer/Dockerfile`](../services/indexer/Dockerfile)).
+
+- **Root Directory:** *empty* — leave it blank so the build context is the repo root and the
+  Dockerfile can reach `packages/shared`. (Do **not** set it to `services/indexer`.)
+- **Builder:** Dockerfile.
+- **Dockerfile Path:** `services/indexer/Dockerfile`.
+- **Build command:** *none* — the Dockerfile is the build.
+- **Start command:** *none* — the Dockerfile `CMD` (`python -m provenalt_indexer.worker`) is the
+  start command. Do not set a custom start command.
 - **Runtime profile:** long-running worker (no public HTTP port; not request/response).
-- **Start command:** the worker entrypoint (defined in Group 2). Placeholder for now.
 - **Restart policy:** always/on-failure — the indexer must survive restarts and resume
   from its cursor.
 - **Env vars to set** (names from `.env.example`):
@@ -36,11 +46,21 @@ Create one Railway **project** for Provenalt. Inside it, provision:
   - `PROVENALT_GETLOGS_INITIAL_CHUNK`, `PROVENALT_GETLOGS_MIN_CHUNK`, `PROVENALT_GETLOGS_MAX_CHUNK`
 
 ### 1.3 Service: `api` (request/response)
-- **Root directory:** `services/api`
-- **Runtime profile:** request/response HTTP service; Railway assigns a public domain.
-- **Start command:** `uvicorn provenalt_api.main:app --host 0.0.0.0 --port $PORT`
+
+Same monorepo constraint as the indexer — build from the committed **Dockerfile** with the
+**repo root** as the build context (see [`services/api/Dockerfile`](../services/api/Dockerfile)).
+
+- **Root Directory:** *empty* — leave it blank (build context = repo root). (Do **not** set it
+  to `services/api`.)
+- **Builder:** Dockerfile.
+- **Dockerfile Path:** `services/api/Dockerfile`.
+- **Build command:** *none* — the Dockerfile is the build.
+- **Start command:** *none* — the Dockerfile `CMD` starts uvicorn bound to `0.0.0.0` and the
+  Railway-injected `$PORT`. Do not set a custom start command.
 - **Pre-deploy / release command:** apply migrations before starting —
-  `cd packages/shared && alembic upgrade head` (see §1.5).
+  `cd packages/shared && alembic upgrade head`. This runs inside the built image, where the
+  source tree (including `alembic.ini` + `migrations/`) sits at `/app/packages/shared` (see §1.5).
+- **Runtime profile:** request/response HTTP service; Railway assigns a public domain.
 - **Env vars to set** (names from `.env.example`):
   - `DATABASE_URL` (reference the Postgres plugin)
   - `PROVENALT_ENVIRONMENT=production`, `PROVENALT_LOG_LEVEL=INFO`, `PROVENALT_LOG_FORMAT=json`
@@ -105,8 +125,10 @@ Create one Railway **project** for Provenalt. Inside it, provision:
 
 - [ ] Railway project created
 - [ ] Postgres database added; `DATABASE_URL` available
-- [ ] `indexer` service created (root `services/indexer`), env vars set
-- [ ] `api` service created (root `services/api`), env vars set
+- [ ] `indexer` service created (Root Directory **empty**, Dockerfile Path
+      `services/indexer/Dockerfile`), env vars set
+- [ ] `api` service created (Root Directory **empty**, Dockerfile Path
+      `services/api/Dockerfile`), env vars set
 - [ ] Deploys gated on green CI
 - [ ] Vercel project created (root `web/`), `NEXT_PUBLIC_API_BASE_URL` set
 - [ ] Domains attached (explorer + optional api subdomain)

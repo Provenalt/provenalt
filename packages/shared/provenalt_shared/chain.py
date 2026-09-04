@@ -10,6 +10,11 @@ Public RPC endpoints impose two independent limits that this client adapts to:
   pressure is systemic, not provider-specific — so the client sleeps with exponential
   backoff (jittered, capped) and retries, up to ``max_retries`` times, before finally
   raising. A long-running indexer must treat 429 as transient rather than crashing.
+* **Transient transport failures** — HTTP 5xx, connection errors, and non-JSON 4xx surface
+  as ``TransportError``. These are treated exactly like 429s: rotate providers, and when
+  every provider has failed the same request, sleep with the same exponential backoff and
+  retry up to ``max_retries`` before finally raising. This keeps the worker alive through a
+  flaky provider outage — even when only one provider is configured.
 
 The RPC transport is injected (a callable ``(url, payload) -> response``) so the adaptive
 behaviour can be unit-tested deterministically with in-memory fakes — no network required.
@@ -27,6 +32,14 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 import httpx
+
+from provenalt_shared.logging import get_logger
+
+log = get_logger("chain.client")
+
+# Sent on every RPC request: some public endpoints reject a missing/blank User-Agent or the
+# httpx default. A descriptive UA identifies our traffic and keeps those endpoints happy.
+DEFAULT_USER_AGENT = "provenalt-indexer/0.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Errors
@@ -219,12 +232,21 @@ class HttpxTransport:
     * HTTP 5xx / non-JSON 4xx / connection failures → :class:`TransportError`
     """
 
-    def __init__(self, timeout: float = 10.0, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        timeout: float = 10.0,
+        client: httpx.Client | None = None,
+        user_agent: str = DEFAULT_USER_AGENT,
+    ) -> None:
         self._client = client if client is not None else httpx.Client(timeout=timeout)
+        self._user_agent = user_agent
 
     def __call__(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            response = self._client.post(url, json=payload)
+            # Send an explicit User-Agent — some public endpoints reject the httpx default.
+            response = self._client.post(
+                url, json=payload, headers={"User-Agent": self._user_agent}
+            )
         except httpx.HTTPError as exc:
             raise TransportError(f"transport failure for {url}: {exc}") from exc
 
@@ -313,22 +335,44 @@ class ChainClient:
         base = min(self._backoff_max, self._backoff_initial * (2.0**attempt))
         return base * 0.5 + self._rng.random() * (base * 0.5)
 
+    def _maybe_backoff(self, backoff_round: int, *, provider: str, error: ChainError) -> int:
+        """Every provider has failed this request (429 or transport); the pressure is
+        systemic. Sleep with exponential backoff and return the next round, or raise
+        ``error`` once the retry budget (``max_retries``) is spent.
+
+        Logs the flaky provider + error so operators can see which endpoint is failing.
+        Call only when the failure streak has reached ``len(providers)``.
+        """
+        if backoff_round >= self._max_retries:
+            raise error
+        delay = self._backoff_delay(backoff_round)
+        log.warning(
+            "rpc_backoff",
+            provider=provider,
+            error=str(error),
+            error_type=type(error).__name__,
+            backoff_round=backoff_round,
+            delay_seconds=round(delay, 3),
+        )
+        self._sleep(delay)
+        return backoff_round + 1
+
     # ── Generic JSON-RPC ────────────────────────────────────────────────────
 
     def call(self, method: str, params: list[Any]) -> Any:
         """Make a single JSON-RPC call, rotating providers on 429/transport failures.
 
-        On a 429 the client rotates to the next provider; when *every* provider has 429'd
-        for this request it sleeps with exponential backoff and retries, up to
-        ``max_retries`` rounds, before finally raising :class:`RateLimitError`. Transport
-        failures rotate providers up to ``2 * len(providers)`` times. JSON-RPC-level errors
-        (e.g. method-not-found) raise :class:`RpcError` immediately without rotation — they
-        are not provider-specific.
+        On a transient failure — HTTP 429 (:class:`RateLimitError`) or a transport failure
+        (:class:`TransportError`: 5xx, connection error, non-JSON 4xx) — the client rotates
+        to the next provider; when *every* provider has failed this request it sleeps with
+        exponential backoff and retries, up to ``max_retries`` rounds, before finally
+        raising the last error. JSON-RPC-level errors (e.g. method-not-found) raise
+        :class:`RpcError` immediately without rotation — they are not provider-specific.
         """
-        rate_limit_streak = 0  # consecutive 429s across providers for this request
+        failure_streak = 0  # consecutive provider failures (429 or transport) this request
         backoff_round = 0  # exponential-backoff rounds already spent
-        transport_attempts = 0
         while True:
+            provider = self.current_provider
             payload = {
                 "jsonrpc": "2.0",
                 "id": next(self._request_ids),
@@ -336,24 +380,15 @@ class ChainClient:
                 "params": params,
             }
             try:
-                response = self._transport(self.current_provider, payload)
-            except RateLimitError:
+                response = self._transport(provider, payload)
+            except (RateLimitError, TransportError) as exc:
+                # Transient, provider-level failure: rotate. When every provider has failed
+                # this request the pressure is systemic → sleep with backoff and retry.
                 self._rotate_provider()
-                rate_limit_streak += 1
-                # Every provider 429'd this request → systemic pressure; back off + retry.
-                if rate_limit_streak >= len(self._rpc_urls):
-                    if backoff_round >= self._max_retries:
-                        raise
-                    self._sleep(self._backoff_delay(backoff_round))
-                    backoff_round += 1
-                    rate_limit_streak = 0
-                continue
-            except TransportError:
-                rate_limit_streak = 0
-                transport_attempts += 1
-                self._rotate_provider()
-                if transport_attempts >= 2 * len(self._rpc_urls):
-                    raise
+                failure_streak += 1
+                if failure_streak >= len(self._rpc_urls):
+                    backoff_round = self._maybe_backoff(backoff_round, provider=provider, error=exc)
+                    failure_streak = 0
                 continue
 
             error = response.get("error")
@@ -426,27 +461,29 @@ class ChainClient:
     ) -> list[dict[str, Any]]:
         """Fetch all logs in ``[from_block, to_block]`` using adaptive chunking.
 
-        Shrinks the chunk on block-range caps and 429s (rotating providers on 429/transport
-        failures), and grows it back toward the maximum after each success. A 429 also
-        shrinks the chunk; when *every* provider has 429'd the current range, the client
-        sleeps with exponential backoff and retries up to ``max_retries`` rounds before
-        finally raising — so transient rate limits never crash a long-running backfill.
+        Shrinks the chunk on block-range caps and 429s, and grows it back toward the maximum
+        after each success. A 429 or transport failure rotates providers; when *every*
+        provider has failed the current range the client sleeps with exponential backoff and
+        retries up to ``max_retries`` rounds before finally raising — so transient rate
+        limits and provider outages never crash a long-running backfill. (A 429 also shrinks
+        the chunk; a transport 5xx does not — it is not about range size.)
         """
         if to_block < from_block:
             return []
 
         logs: list[dict[str, Any]] = []
         start = from_block
-        attempts = 0  # block-range-cap / transport attempts for the current range
-        rate_limit_streak = 0  # consecutive 429s across providers for the current range
+        attempts = 0  # block-range-cap attempts for the current range
+        failure_streak = 0  # consecutive provider failures (429/transport) for this range
         backoff_round = 0  # exponential-backoff rounds spent on the current range
 
         while start <= to_block:
             end = min(start + self._chunker.size - 1, to_block)
+            provider = self.current_provider
             try:
                 chunk_logs = self._get_logs_once(address, topics, start, end)
             except BlockRangeCapError:
-                rate_limit_streak = 0
+                failure_streak = 0
                 attempts += 1
                 if attempts >= self._max_attempts_per_range:
                     raise
@@ -456,25 +493,17 @@ class ChainClient:
                 else:
                     self._chunker.shrink()
                 continue
-            except RateLimitError:
-                # 429 is transient: shrink the chunk AND rotate to the next provider. Once
-                # every provider has 429'd this range, sleep with exponential backoff.
+            except (RateLimitError, TransportError) as exc:
+                # Transient provider failure: rotate. A 429 also shrinks the chunk (a 5xx
+                # does not — it isn't about range size). When every provider has failed this
+                # range, sleep with exponential backoff and retry.
                 self._rotate_provider()
-                self._chunker.shrink()
-                rate_limit_streak += 1
-                if rate_limit_streak >= len(self._rpc_urls):
-                    if backoff_round >= self._max_retries:
-                        raise
-                    self._sleep(self._backoff_delay(backoff_round))
-                    backoff_round += 1
-                    rate_limit_streak = 0
-                continue
-            except TransportError:
-                rate_limit_streak = 0
-                attempts += 1
-                if attempts >= self._max_attempts_per_range:
-                    raise
-                self._rotate_provider()
+                if isinstance(exc, RateLimitError):
+                    self._chunker.shrink()
+                failure_streak += 1
+                if failure_streak >= len(self._rpc_urls):
+                    backoff_round = self._maybe_backoff(backoff_round, provider=provider, error=exc)
+                    failure_streak = 0
                 continue
 
             # Success: record, grow the chunk, advance, and reset every retry budget.
@@ -482,7 +511,7 @@ class ChainClient:
             self._chunker.grow()
             start = end + 1
             attempts = 0
-            rate_limit_streak = 0
+            failure_streak = 0
             backoff_round = 0
 
         return logs

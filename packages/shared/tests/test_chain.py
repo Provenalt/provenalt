@@ -18,6 +18,7 @@ from provenalt_shared.chain import (
     HttpxTransport,
     RateLimitError,
     RpcError,
+    TransportError,
 )
 
 
@@ -150,6 +151,27 @@ class RateLimitedNTimes:
         if self.remaining_fails > 0:
             self.remaining_fails -= 1
             raise RateLimitError("HTTP 429 Too Many Requests")
+        return {
+            "jsonrpc": "2.0",
+            "id": payload["id"],
+            "result": [{"data": "0x", "_range": [fb, tb]}],
+        }
+
+
+class TransportFailsNTimes:
+    """Raises TransportError (a 5xx-style outage) the first ``fail_times`` calls across ALL
+    providers, then always succeeds. Simulates a transient provider outage that clears."""
+
+    def __init__(self, fail_times: int) -> None:
+        self.remaining_fails = fail_times
+        self.calls: list[tuple[str, int, int]] = []
+
+    def __call__(self, url: str, payload: dict) -> dict:
+        fb, tb = _range_of(payload)
+        self.calls.append((url, fb, tb))
+        if self.remaining_fails > 0:
+            self.remaining_fails -= 1
+            raise TransportError("HTTP 500 Internal Server Error")
         return {
             "jsonrpc": "2.0",
             "id": payload["id"],
@@ -352,6 +374,59 @@ def test_getlogs_raises_after_max_retries_when_rate_limit_never_clears() -> None
         client.get_logs(address="0xabc", topics=[], from_block=0, to_block=999)
     # It backed off max_retries times before finally giving up — never on the first 429.
     assert len(sleeps.delays) == 3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# get_logs: transient transport (5xx) backoff + recover
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_getlogs_backs_off_then_recovers_on_transient_transport_error() -> None:
+    # The production case: a SINGLE provider returns 500 a few times, then recovers.
+    transport = TransportFailsNTimes(fail_times=3)
+    sleeps = RecordingSleep()
+    client = ChainClient(
+        rpc_urls=["https://only.example"],
+        transport=transport,
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        backoff_initial_seconds=2.0,
+        backoff_max_seconds=60.0,
+        max_retries=5,
+        sleep=sleeps,
+        rng=random.Random(0),
+    )
+
+    logs = client.get_logs(address="0xabc", topics=[], from_block=0, to_block=500)
+
+    _assert_contiguous_coverage(logs, 0, 500)
+    # It backed off (slept) on each transient 500 rather than crashing the worker.
+    assert len(sleeps.delays) == 3
+    # A 5xx must NOT shrink the chunk (it is not a range-size problem) — same range retried.
+    spans = {tb - fb + 1 for _, fb, tb in transport.calls}
+    assert spans == {501}
+
+
+def test_getlogs_raises_after_max_retries_when_transport_never_recovers() -> None:
+    class AlwaysTransportError:
+        def __call__(self, url: str, payload: dict) -> dict:
+            raise TransportError("HTTP 500")
+
+    sleeps = RecordingSleep()
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=AlwaysTransportError(),
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        max_retries=3,
+        sleep=sleeps,
+        rng=random.Random(0),
+    )
+    with pytest.raises(TransportError):
+        client.get_logs(address="0xabc", topics=[], from_block=0, to_block=999)
+    assert len(sleeps.delays) == 3  # backed off max_retries times before finally raising
 
 
 def test_backoff_delay_doubles_with_jitter_and_caps_at_max() -> None:

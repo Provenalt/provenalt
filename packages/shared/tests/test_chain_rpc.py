@@ -54,6 +54,82 @@ def test_call_rotates_on_transport_error() -> None:
     assert _client(FlakyA()).call("eth_chainId", []) == "ok"
 
 
+def test_call_backs_off_then_succeeds_on_transient_transport_error() -> None:
+    # The production case: a provider throws intermittent 5xx, then recovers. The call must
+    # back off rather than die.
+    class DownTwiceThenOk:
+        def __init__(self) -> None:
+            self.remaining = 2  # both providers fail once → one full sweep, then recover
+
+        def __call__(self, url: str, payload: dict) -> dict:
+            if self.remaining > 0:
+                self.remaining -= 1
+                raise TransportError("HTTP 500")
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": "0x2a"}
+
+    sleeps: list[float] = []
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=DownTwiceThenOk(),
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        max_retries=5,
+        sleep=sleeps.append,
+        rng=random.Random(0),
+    )
+    assert client.call("eth_blockNumber", []) == "0x2a"
+    assert len(sleeps) == 1  # one full failure sweep → one backoff sleep, then success
+
+
+def test_call_raises_after_max_retries_when_all_providers_transport_fail() -> None:
+    class AlwaysDown:
+        def __call__(self, url: str, payload: dict) -> dict:
+            raise TransportError("HTTP 500")
+
+    sleeps: list[float] = []
+    client = ChainClient(
+        rpc_urls=["https://a.example", "https://b.example"],
+        transport=AlwaysDown(),
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        max_retries=2,
+        sleep=sleeps.append,
+        rng=random.Random(0),
+    )
+    with pytest.raises(TransportError):
+        client.call("eth_blockNumber", [])
+    assert len(sleeps) == 2  # backed off max_retries times before finally raising
+
+
+def test_call_survives_single_provider_transient_500() -> None:
+    # The exact production configuration: ONE provider, intermittent 500s, then recovery.
+    class OneFlakyProvider:
+        def __init__(self) -> None:
+            self.remaining = 3
+
+        def __call__(self, url: str, payload: dict) -> dict:
+            if self.remaining > 0:
+                self.remaining -= 1
+                raise TransportError("HTTP 500")
+            return {"jsonrpc": "2.0", "id": payload["id"], "result": "0x10"}
+
+    sleeps: list[float] = []
+    client = ChainClient(
+        rpc_urls=["https://only.example"],
+        transport=OneFlakyProvider(),
+        initial_chunk=1000,
+        min_chunk=100,
+        max_chunk=8000,
+        max_retries=8,
+        sleep=sleeps.append,
+        rng=random.Random(0),
+    )
+    assert client.get_block_number() == 16
+    assert len(sleeps) == 3  # backed off on each transient failure, then recovered
+
+
 def test_call_raises_rpc_error_without_rotating() -> None:
     def transport(url: str, payload: dict) -> dict:
         return {

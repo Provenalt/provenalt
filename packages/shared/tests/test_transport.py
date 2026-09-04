@@ -101,3 +101,30 @@ def test_400_with_non_json_body_still_maps_to_transport_error() -> None:
     transport = HttpxTransport(client=_client(handler))
     with pytest.raises(TransportError):
         transport("https://a.example", _PAYLOAD)
+
+
+# ── User-Agent header (some public endpoints reject the httpx default) ────────────
+
+
+def test_sends_a_user_agent_header_by_default() -> None:
+    seen: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["ua"] = request.headers.get("user-agent")
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": []})
+
+    HttpxTransport(client=_client(handler))("https://a.example", _PAYLOAD)
+    assert seen["ua"] is not None
+    assert "provenalt" in seen["ua"].lower()
+
+
+def test_user_agent_is_configurable() -> None:
+    seen: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["ua"] = request.headers.get("user-agent")
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": []})
+
+    transport = HttpxTransport(client=_client(handler), user_agent="acme-indexer/9.9")
+    transport("https://a.example", _PAYLOAD)
+    assert seen["ua"] == "acme-indexer/9.9"
